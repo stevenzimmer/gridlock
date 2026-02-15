@@ -4,16 +4,13 @@ export function Punchouts() {
     const {punchoutsRemaining} = useGameContext();
     return (
         <div className="rounded border border-slate-700 bg-slate-900/40 px-3 py-2">
-            <p className="flex items-center gap-2 text-sm font-semibold text-emerald-200">
-                <span>
-                    {punchoutsRemaining}{" "}
-                    <span className="uppercase tracking-wide text-emerald-300/80">
-                        Punchouts
-                    </span>{" "}
-                    remaining
-                </span>
+            <p className="text-sm font-semibold text-emerald-200 mb-2">
+                {punchoutsRemaining}{" "}
+                <span className="uppercase tracking-wide text-emerald-300/80">
+                    Punchouts
+                </span>{" "}
             </p>
-            <div className="mt-2 flex flex-wrap gap-1">
+            <div className="flex flex-wrap gap-1">
                 {Array.from({length: punchoutsRemaining}).map((_, idx) => (
                     <span
                         key={idx}

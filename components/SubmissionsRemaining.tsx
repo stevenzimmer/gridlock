@@ -10,7 +10,7 @@ export function SubmissionsRemaining() {
     return (
         <div className="rounded border border-slate-700 bg-slate-900/40 px-3 py-2">
             <p className="tracking-wide text-white mb-2">
-                {invalidSubmissionsRemaining} invalid submissions remaining.
+                {invalidSubmissionsRemaining} misses left
             </p>
             <div className="flex flex-wrap gap-1">
                 {Array.from({length: invalidSubmissionsRemaining}).map(
