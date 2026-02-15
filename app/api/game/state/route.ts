@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getOrCreatePlayerState } from "@/lib/server/game-service";
+import { getOrCreatePlayerState, getPlayerUsername } from "@/lib/server/game-service";
+import { isValidPlayerId } from "@/lib/player-id";
 
 export const dynamic = "force-dynamic";
 
@@ -10,10 +11,14 @@ export async function GET(request: Request) {
   if (!playerId) {
     return NextResponse.json({ error: "Missing playerId" }, { status: 400 });
   }
+  if (!isValidPlayerId(playerId)) {
+    return NextResponse.json({ error: "Invalid playerId format" }, { status: 400 });
+  }
 
   try {
     const current = await getOrCreatePlayerState(playerId);
-    return NextResponse.json(current);
+    const username = getPlayerUsername(playerId);
+    return NextResponse.json({ ...current, username });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load game state";
     return NextResponse.json({ error: message }, { status: 500 });

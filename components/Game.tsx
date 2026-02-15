@@ -1,96 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { normalizeSelection, selectionToDisplay } from "@/lib/game";
-import type { GameState, Position } from "@/lib/types";
+import { isValidPlayerId } from "@/lib/player-id";
+import { isValidUsername, normalizeUsername } from "@/lib/username";
+import type { GameState, Position, StatePayload, SubmitPayload, ProfilePayload } from "@/lib/types";
+import { dedupePositions, pruneMarkedInvalidPositions } from "@/lib/positions";
 import { GRID_COLS, GRID_ROWS, MIN_WORD_LENGTH } from "@/lib/config";
 import { GridView } from "@/components/GridView";
 import { HUD } from "@/components/HUD";
 
-type StatePayload = {
-  dateKey: string;
-  state: GameState;
-  completed: boolean;
-};
-
-type SubmitPayload = StatePayload & {
-  accepted: boolean;
-  message: string;
-};
-
 const PLAYER_ID_STORAGE_KEY = "gravity-grid-player-id";
 
-function positionKey(position: Position): string {
-  return `${position.row}:${position.col}`;
-}
 
-function dedupePositions(positions: Position[]): Position[] {
-  const seen = new Set<string>();
-  const unique: Position[] = [];
-  for (const position of positions) {
-    const key = positionKey(position);
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    unique.push(position);
-  }
-  return unique;
-}
 
-function shouldClearMarkedTile(
-  gridBefore: GameState["grid"],
-  position: Position,
-  clearedRowsByCol: Map<number, number>,
-  clearedKeys: Set<string>
-): boolean {
-  const key = positionKey(position);
-  if (clearedKeys.has(key)) {
-    return true;
-  }
-
-  const clearedRow = clearedRowsByCol.get(position.col);
-  if (clearedRow === undefined || position.row >= clearedRow) {
-    return false;
-  }
-
-  for (let row = position.row + 1; row <= clearedRow; row++) {
-    if (gridBefore[row]?.[position.col]?.kind === "stone") {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function pruneMarkedInvalidPositions(
-  previousMarked: Position[],
-  gridBefore: GameState["grid"],
-  clearedSelection: Position[],
-  gridAfter: GameState["grid"]
-): Position[] {
-  if (!previousMarked.length) {
-    return previousMarked;
-  }
-
-  const clearedRowsByCol = new Map<number, number>();
-  for (const position of clearedSelection) {
-    const existing = clearedRowsByCol.get(position.col);
-    if (existing === undefined || position.row > existing) {
-      clearedRowsByCol.set(position.col, position.row);
-    }
-  }
-  const clearedKeys = new Set(clearedSelection.map(positionKey));
-
-  return previousMarked.filter((position) => {
-    if (shouldClearMarkedTile(gridBefore, position, clearedRowsByCol, clearedKeys)) {
-      return false;
-    }
-    const tile = gridAfter[position.row]?.[position.col];
-    return tile?.kind === "letter";
-  });
-}
 
 function getOrCreatePlayerId(): string {
   const existing = localStorage.getItem(PLAYER_ID_STORAGE_KEY);
@@ -103,8 +27,11 @@ function getOrCreatePlayerId(): string {
   return created;
 }
 
+
 export function Game() {
   const [playerId, setPlayerId] = useState<string>("");
+  const [username, setUsername] = useState<string | null>(null);
+  const [usernameDraft, setUsernameDraft] = useState<string>("");
   const [dateKey, setDateKey] = useState<string>("");
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [selection, setSelection] = useState<Position[]>([]);
@@ -115,8 +42,10 @@ export function Game() {
   const [lastWord, setLastWord] = useState<string>("");
   const [loadingState, setLoadingState] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [savingUsername, setSavingUsername] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+
 
   const draggingRef = useRef(false);
   const anchorRef = useRef<Position | null>(null);
@@ -124,32 +53,45 @@ export function Game() {
 
   const disabled = loadingState || submitting || completed || !gameState;
 
+  const loadStateForPlayer = useCallback(async (pid: string) => {
+    const response = await fetch(`/api/game/state?playerId=${encodeURIComponent(pid)}`);
+    const payload = (await response.json()) as StatePayload | { error: string };
+    if (!response.ok || "error" in payload) {
+      throw new Error((payload as { error: string }).error || "Failed to load game state");
+    }
+
+    setDateKey(payload.dateKey);
+    setGameState(payload.state);
+    setCompleted(payload.completed);
+    setUsername(payload.username ?? null);
+    setUsernameDraft(payload.username ?? "");
+    setMarkedInvalidSelection([]);
+    setSelection([]);
+    setInvalidSelection([]);
+    selectionRef.current = [];
+    anchorRef.current = null;
+    setMessage(payload.completed ? "Daily run completed." : null);
+  }, []);
+
   useEffect(() => {
     let active = true;
 
     const load = async () => {
       try {
-        const pid = getOrCreatePlayerId();
+        const stored = getOrCreatePlayerId();
+        const pid = isValidPlayerId(stored) ? stored : crypto.randomUUID();
+        if (pid !== stored) {
+          localStorage.setItem(PLAYER_ID_STORAGE_KEY, pid);
+        }
         if (!active) {
           return;
         }
         setPlayerId(pid);
 
-        const response = await fetch(`/api/game/state?playerId=${encodeURIComponent(pid)}`);
-        const payload = (await response.json()) as StatePayload | { error: string };
-        if (!response.ok || "error" in payload) {
-          throw new Error((payload as { error: string }).error || "Failed to load game state");
-        }
-
         if (!active) {
           return;
         }
-
-        setDateKey(payload.dateKey);
-        setGameState(payload.state);
-        setCompleted(payload.completed);
-        setMarkedInvalidSelection([]);
-        setMessage(payload.completed ? "Daily run completed." : null);
+        await loadStateForPlayer(pid);
       } catch (error) {
         if (!active) {
           return;
@@ -167,7 +109,46 @@ export function Game() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [loadStateForPlayer]);
+
+  const updateUsername = async () => {
+    const normalized = normalizeUsername(usernameDraft);
+    if (normalized.length > 0 && !isValidUsername(normalized)) {
+      setMessage("Use 3-40 chars: letters, numbers, '.', '_' or '-'.");
+      return;
+    }
+
+    if (normalized === (username ?? "")) {
+      return;
+    }
+
+    setSavingUsername(true);
+    try {
+      const response = await fetch("/api/player/profile", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          playerId,
+          username: normalized
+        })
+      });
+
+      const payload = (await response.json()) as ProfilePayload | { error: string };
+      if (!response.ok || "error" in payload) {
+        throw new Error((payload as { error: string }).error || "Failed to update username.");
+      }
+
+      setUsername(payload.username);
+      setUsernameDraft(payload.username ?? "");
+      setMessage(payload.username ? `Username updated: ${payload.username}` : "Username cleared.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to update username.");
+    } finally {
+      setSavingUsername(false);
+    }
+  };
 
   const selectedDisplay = useMemo(() => {
     if (!gameState) {
@@ -437,6 +418,9 @@ export function Game() {
     <>
       <HUD
         playerId={playerId}
+        playerDisplayName={username ?? playerId}
+        hasUsername={Boolean(username)}
+        usernameDraft={usernameDraft}
         score={gameState?.score ?? 0}
         level={gameState?.level ?? 1}
         wordsCleared={gameState?.stats.wordsCleared ?? 0}
@@ -449,16 +433,18 @@ export function Game() {
         selectedDisplay={selectedDisplay}
         canSubmitSelection={canSubmitSelection}
         message={message}
+        savingUsername={savingUsername}
+        onUsernameDraftChange={setUsernameDraft}
+        lastWord={lastWord}
+        onUsernameSave={() => {
+          void updateUsername();
+        }}
         onSubmitSelection={() => {
           void runSubmit();
         }}
       />
 
-      <footer className="mt-3 rounded-md border border-slate-700 bg-slate-900/40 px-3 py-2 text-xs text-slate-300">
-        <p>Controls: drag across a row, double-click a letter to punch it out, or keyboard arrows + Space + Enter.</p>
-        <p>Daily mode: one persistent run per day for every player, same board for all players.</p>
-        <p>Last word: {lastWord || "-"}</p>
-      </footer>
+  
     </>
   );
 
@@ -466,7 +452,7 @@ export function Game() {
     <section className="relative mx-auto w-full max-w-6xl">
       <div className="mb-3 flex items-center justify-between gap-2 lg:hidden">
         <div className="min-w-0">
-          <h1 className="text-2xl font-black tracking-tight text-cyan-100">Gravity Grid</h1>
+          <h1 className="text-2xl font-black tracking-tight text-cyan-100">Grid Lock</h1>
           <p className="text-xs text-slate-300">Daily board: {dateKey || "-"}</p>
         </div>
         <button
@@ -517,6 +503,10 @@ export function Game() {
             <GridView
               grid={gameState.grid}
               disabled={completed || gameState.gameOver}
+              score={gameState.score}
+              level={gameState.level}
+              wordsCleared={gameState.stats.wordsCleared}
+              longestWord={gameState.stats.longestWord}
               selection={selection}
               invalidSelection={invalidSelection}
               markedInvalidSelection={markedInvalidSelection}

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { submitPlayerPunchout } from "@/lib/server/game-service";
+import { isValidPlayerId } from "@/lib/player-id";
 import type { Position } from "@/lib/types";
 
 type PunchoutBody = {
@@ -19,6 +20,9 @@ export async function POST(request: Request) {
   const playerId = body.playerId?.trim();
   if (!playerId) {
     return NextResponse.json({ error: "Missing playerId" }, { status: 400 });
+  }
+  if (!isValidPlayerId(playerId)) {
+    return NextResponse.json({ error: "Invalid playerId format" }, { status: 400 });
   }
 
   const position = body.position;

@@ -28,6 +28,32 @@ type PlayerStateRow = {
   completed: number;
 };
 
+export type LeaderboardEntry = {
+  playerId: string;
+  displayName: string;
+  dateKey: string;
+  score: number;
+  level: number;
+  wordsCleared: number;
+  longestWord: string;
+  updatedAt: string;
+};
+
+type LeaderboardRow = {
+  player_id: string;
+  username: string | null;
+  date_key: string;
+  score: number | null;
+  level: number | null;
+  words_cleared: number | null;
+  longest_word: string | null;
+  updated_at: string;
+};
+
+type PlayerProfileRow = {
+  username: string | null;
+};
+
 const BOARD_PROMPT_VERSION = "v3";
 
 type GeneratedBoardPayload = {
@@ -130,7 +156,7 @@ async function generateBoardWithOpenAI(dateKey: string): Promise<Tile[][]> {
       {
         role: "user",
         content:
-          `Generate the Gravity Grid board for ${dateKey}. Rules:\n` +
+          `Generate the Grid Lock board for ${dateKey}. Rules:\n` +
           `- Grid size: ${GRID_ROWS} rows x ${GRID_COLS} cols\n` +
           "- Characters: A-Z and optional '*' wildcard\n" +
           "- Use a balanced vowel/consonant distribution\n" +
@@ -551,4 +577,61 @@ export async function submitPlayerPunchout(
     message: next.message,
     accepted: true
   };
+}
+
+export function getPlayerUsername(playerId: string): string | null {
+  const db = getDb();
+  const row = db
+    .prepare("SELECT username FROM player_profiles WHERE player_id = ?")
+    .get(playerId) as PlayerProfileRow | undefined;
+  const username = row?.username?.trim();
+  return username ? username : null;
+}
+
+export function upsertPlayerUsername(playerId: string, username: string | null): string | null {
+  const db = getDb();
+  const normalizedUsername = username?.trim() || null;
+
+  db.prepare(
+    `INSERT INTO player_profiles (player_id, username)
+     VALUES (?, ?)
+     ON CONFLICT(player_id) DO UPDATE SET
+       username = excluded.username,
+       updated_at = CURRENT_TIMESTAMP`
+  ).run(playerId, normalizedUsername);
+
+  return normalizedUsername;
+}
+
+export function getLeaderboard(limit = 10): LeaderboardEntry[] {
+  const db = getDb();
+  const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  const rows = db
+    .prepare(
+      `SELECT
+         pds.player_id,
+         pp.username,
+         pds.date_key,
+         CAST(COALESCE(json_extract(pds.state_json, '$.score'), 0) AS INTEGER) AS score,
+         CAST(COALESCE(json_extract(pds.state_json, '$.level'), 1) AS INTEGER) AS level,
+         CAST(COALESCE(json_extract(pds.state_json, '$.stats.wordsCleared'), 0) AS INTEGER) AS words_cleared,
+         CAST(COALESCE(json_extract(pds.state_json, '$.stats.longestWord'), '') AS TEXT) AS longest_word,
+         pds.updated_at
+       FROM player_daily_state AS pds
+       LEFT JOIN player_profiles AS pp ON pp.player_id = pds.player_id
+       ORDER BY score DESC, level DESC, words_cleared DESC, LENGTH(longest_word) DESC, pds.updated_at ASC
+       LIMIT ?`
+    )
+    .all(safeLimit) as LeaderboardRow[];
+
+  return rows.map((row) => ({
+    playerId: row.player_id,
+    displayName: row.username?.trim() || row.player_id,
+    dateKey: row.date_key,
+    score: row.score ?? 0,
+    level: row.level ?? 1,
+    wordsCleared: row.words_cleared ?? 0,
+    longestWord: row.longest_word ?? "",
+    updatedAt: row.updated_at
+  }));
 }

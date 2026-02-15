@@ -7,6 +7,10 @@ import type { Grid, Position } from "@/lib/types";
 type GridViewProps = {
   grid: Grid;
   disabled: boolean;
+  score: number;
+  level: number;
+  wordsCleared: number;
+  longestWord: string;
   selection: Position[];
   invalidSelection: Position[];
   markedInvalidSelection: Position[];
@@ -21,6 +25,10 @@ type GridViewProps = {
 export function GridView({
   grid,
   disabled,
+  score,
+  level,
+  wordsCleared,
+  longestWord,
   selection,
   invalidSelection,
   markedInvalidSelection,
@@ -44,7 +52,7 @@ export function GridView({
         "relative mx-auto w-full rounded-xl lg:p-2 outline-none focus:ring-2 focus:ring-cyan-300",
         disabled ? "bg-slate-700/60" : "bg-slate-900/60"
       ].join(" ")}
-      aria-label="Gravity Grid board"
+      aria-label="Grid Lock board"
     >
       <div className="grid grid-cols-7 gap-1">
         {grid.map((row, rowIdx) =>
@@ -95,10 +103,20 @@ export function GridView({
       {disabled ? (
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-slate-950/35"
+          className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-slate-950/35 px-4"
         >
-          <div className="game-over-stamp rounded-lg border-4 border-slate-200/80 bg-slate-800/85 px-6 py-3 text-3xl font-black uppercase tracking-[0.2em] text-slate-100 shadow-2xl sm:text-5xl">
-            Game Over
+          <div className="w-full max-w-md rounded-lg border-4 border-slate-200/80 bg-slate-800/90 px-4 py-4 text-slate-100 shadow-2xl">
+            <div className="game-over-stamp mb-3 text-center text-3xl font-black uppercase tracking-[0.2em] sm:text-5xl py-12">
+              Grid lock!
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-sm font-semibold sm:text-lg">
+              <div className="rounded-md border border-slate-300/30 bg-slate-950/40 px-3 py-2">Score: {score}</div>
+              <div className="rounded-md border border-slate-300/30 bg-slate-950/40 px-3 py-2">Level: {level}</div>
+              <div className="rounded-md border border-slate-300/30 bg-slate-950/40 px-3 py-2">Words: {wordsCleared}</div>
+              <div className="rounded-md border border-slate-300/30 bg-slate-950/40 px-3 py-2">
+                Longest: {longestWord || "-"}
+              </div>
+            </div>
           </div>
         </div>
       ) : null}

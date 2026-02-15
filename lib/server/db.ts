@@ -35,6 +35,12 @@ function createDb(): DB {
       PRIMARY KEY (date_key, player_id),
       FOREIGN KEY (date_key) REFERENCES daily_boards(date_key)
     );
+
+    CREATE TABLE IF NOT EXISTS player_profiles (
+      player_id TEXT PRIMARY KEY,
+      username TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   const columns = db
