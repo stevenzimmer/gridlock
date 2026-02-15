@@ -54,6 +54,13 @@ type PlayerProfileRow = {
   username: string | null;
 };
 
+export class UsernameAlreadyExistsError extends Error {
+  constructor() {
+    super("Username already exists.");
+    this.name = "UsernameAlreadyExistsError";
+  }
+}
+
 const BOARD_PROMPT_VERSION = "v3";
 
 type GeneratedBoardPayload = {
@@ -592,13 +599,25 @@ export function upsertPlayerUsername(playerId: string, username: string | null):
   const db = getDb();
   const normalizedUsername = username?.trim() || null;
 
-  db.prepare(
-    `INSERT INTO player_profiles (player_id, username)
-     VALUES (?, ?)
-     ON CONFLICT(player_id) DO UPDATE SET
-       username = excluded.username,
-       updated_at = CURRENT_TIMESTAMP`
-  ).run(playerId, normalizedUsername);
+  try {
+    db.prepare(
+      `INSERT INTO player_profiles (player_id, username)
+       VALUES (?, ?)
+       ON CONFLICT(player_id) DO UPDATE SET
+         username = excluded.username,
+         updated_at = CURRENT_TIMESTAMP`
+    ).run(playerId, normalizedUsername);
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "SQLITE_CONSTRAINT_UNIQUE"
+    ) {
+      throw new UsernameAlreadyExistsError();
+    }
+    throw error;
+  }
 
   return normalizedUsername;
 }

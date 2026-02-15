@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isValidPlayerId } from "@/lib/player-id";
 import { isValidUsername, normalizeUsername } from "@/lib/username";
-import { upsertPlayerUsername } from "@/lib/server/game-service";
+import { UsernameAlreadyExistsError, upsertPlayerUsername } from "@/lib/server/game-service";
 
 type UpdateProfileBody = {
   playerId?: string;
@@ -44,6 +44,9 @@ export async function POST(request: Request) {
       displayName: username ?? playerId
     });
   } catch (error) {
+    if (error instanceof UsernameAlreadyExistsError) {
+      return NextResponse.json({ error: "Username already exists." }, { status: 409 });
+    }
     const message = error instanceof Error ? error.message : "Unable to update profile";
     return NextResponse.json({ error: message }, { status: 500 });
   }

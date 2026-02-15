@@ -41,6 +41,10 @@ function createDb(): DB {
       username TEXT,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_player_profiles_username_unique
+      ON player_profiles (username)
+      WHERE username IS NOT NULL;
   `);
 
   const columns = db

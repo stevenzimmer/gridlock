@@ -38,6 +38,7 @@ export function Game() {
   const [invalidSelection, setInvalidSelection] = useState<Position[]>([]);
   const [markedInvalidSelection, setMarkedInvalidSelection] = useState<Position[]>([]);
   const [message, setMessage] = useState<string | null>("Loading daily board...");
+  const [errorMessage, setErrorMessage] = useState<string>("");
   const [cursor, setCursor] = useState<Position>({ row: GRID_ROWS - 1, col: 0 });
   const [lastWord, setLastWord] = useState<string>("");
   const [loadingState, setLoadingState] = useState(true);
@@ -144,7 +145,7 @@ export function Game() {
       setUsernameDraft(payload.username ?? "");
       setMessage(payload.username ? `Username updated: ${payload.username}` : "Username cleared.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to update username.");
+      setErrorMessage(error instanceof Error ? error.message : "Failed to update username.");
     } finally {
       setSavingUsername(false);
     }
@@ -433,6 +434,7 @@ export function Game() {
         selectedDisplay={selectedDisplay}
         canSubmitSelection={canSubmitSelection}
         message={message}
+        errorMessage={errorMessage}
         savingUsername={savingUsername}
         onUsernameDraftChange={setUsernameDraft}
         lastWord={lastWord}
@@ -443,8 +445,6 @@ export function Game() {
           void runSubmit();
         }}
       />
-
-  
     </>
   );
 

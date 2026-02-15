@@ -30,6 +30,7 @@ type HUDProps = {
     selectedDisplay: string;
     canSubmitSelection: boolean;
     message: string | null;
+    errorMessage: string;
     savingUsername: boolean;
     onUsernameDraftChange: (value: string) => void;
     onUsernameSave: () => void;
@@ -50,10 +51,10 @@ export function HUD({
     dateKey,
     completed,
     loading,
-    lastWord,
     selectedDisplay,
     canSubmitSelection,
     message,
+    errorMessage,
     savingUsername,
     onUsernameDraftChange,
     onUsernameSave,
@@ -84,6 +85,48 @@ export function HUD({
             </div>
 
             <div className="rounded border border-slate-700 bg-slate-900/40 px-3 py-2">
+                {!hasUsername ? (
+                    <div className="mb-2">
+                        <p className="mb-2 break-all text-xs text-slate-400">
+                            Player ID: {playerId || "-"}
+                        </p>
+                        <form
+                            className="flex gap-2"
+                            onSubmit={(event) => {
+                                event.preventDefault();
+                                onUsernameSave();
+                            }}
+                        >
+                            <input
+                                type="text"
+                                value={usernameDraft}
+                                onChange={(event) =>
+                                    onUsernameDraftChange(event.target.value)
+                                }
+                                placeholder="Create a handle like neonfox"
+                                className="min-w-0 flex-1 rounded border border-slate-600 bg-slate-950/50 px-2 py-1 text-sm text-slate-100 placeholder:text-slate-500"
+                                maxLength={40}
+                                aria-label="Username"
+                            />
+                            <button
+                                type="submit"
+                                disabled={savingUsername}
+                                className="rounded border border-slate-500 px-3 py-1 text-xs font-semibold text-slate-100 enabled:hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45"
+                            >
+                                {savingUsername ? "Saving..." : "Update"}
+                            </button>
+                        </form>
+                        <p className="mt-1 text-xs text-slate-400">
+                            Username is optional. Leave blank to use your player
+                            ID.
+                        </p>
+                        {errorMessage && (
+                            <div className="text-sm text-red-400">
+                                <p>{errorMessage}</p>
+                            </div>
+                        )}
+                    </div>
+                ) : null}
                 <div className="flex justify-between items-center">
                     {hasUsername && (
                         <p className="text-sm uppercase tracking-wide text-slate-400">
@@ -93,45 +136,6 @@ export function HUD({
                             </span>
                         </p>
                     )}
-                    {!hasUsername ? (
-                        <div>
-                            <p className="mb-2 break-all text-xs text-slate-400">
-                                ID: {playerId || "-"}
-                            </p>
-                            <form
-                                className="flex gap-2"
-                                onSubmit={(event) => {
-                                    event.preventDefault();
-                                    onUsernameSave();
-                                }}
-                            >
-                                <input
-                                    type="text"
-                                    value={usernameDraft}
-                                    onChange={(event) =>
-                                        onUsernameDraftChange(
-                                            event.target.value,
-                                        )
-                                    }
-                                    placeholder="Try a handle like neonfox"
-                                    className="min-w-0 flex-1 rounded border border-slate-600 bg-slate-950/50 px-2 py-1 text-sm text-slate-100 placeholder:text-slate-500"
-                                    maxLength={40}
-                                    aria-label="Username"
-                                />
-                                <button
-                                    type="submit"
-                                    disabled={savingUsername}
-                                    className="rounded border border-slate-500 px-3 py-1 text-xs font-semibold text-slate-100 enabled:hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45"
-                                >
-                                    {savingUsername ? "Saving..." : "Update"}
-                                </button>
-                            </form>
-                            <p className="mt-1 text-xs text-slate-400">
-                                Username is optional. Leave blank to use your
-                                player ID.
-                            </p>
-                        </div>
-                    ) : null}
                     <div className="flex items-center justify-between gap-2">
                         <Drawer
                             open={rulesDrawerOpen}
