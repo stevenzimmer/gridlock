@@ -35,7 +35,7 @@ export function TileView({
   return (
     <div
       className={[
-        "flex h-full w-full items-center justify-center rounded border text-3xl font-bold transition",
+        "flex h-full w-full items-center justify-center rounded border text-xl lg:text-3xl font-bold transition",
         disabled
           ? "bg-slate-700 border-slate-500 text-slate-300 opacity-80"
           : invalid
