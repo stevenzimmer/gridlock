@@ -4,7 +4,6 @@ import {useState} from "react";
 import {GridView} from "@/components/GridView";
 import {HUD} from "@/components/HUD";
 import {GameProvider, useGameContext} from "@/components/GameContext";
-import {GameHeader} from "./GameHeader";
 import {StatWrapper} from "./StatWrapper";
 import {Punchouts} from "./Punchouts";
 import {SubmissionsRemaining} from "./SubmissionsRemaining";
@@ -16,7 +15,7 @@ function GameContent() {
     return (
         <section className="relative mx-auto w-full max-w-6xl">
             <div className="mb-3 flex items-center justify-between gap-2 lg:hidden">
-                <div className="min-w-0">
+                <div className="">
                     <h1 className="text-2xl font-black tracking-tight text-cyan-100">
                         Grid Lock
                     </h1>
@@ -30,7 +29,6 @@ function GameContent() {
                     className="inline-flex items-center gap-2 rounded-md border border-slate-600 bg-slate-900/70 px-3 py-2 text-sm font-semibold text-slate-100"
                     aria-label="Open game panel"
                 >
-                    <span>Menu</span>
                     <span className="inline-flex flex-col gap-1">
                         <span className="h-0.5 w-4 bg-slate-100" />
                         <span className="h-0.5 w-4 bg-slate-100" />

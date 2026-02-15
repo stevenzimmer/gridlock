@@ -8,7 +8,7 @@ import {
 import {MIN_WORD_LENGTH} from "@/lib/config";
 export function RulesPanel() {
     return (
-        <DrawerContent side="left" className="w-[94vw] max-w-lg">
+        <DrawerContent side="left" className="w-[94vw] max-w-3xl">
             <div className="space-y-4">
                 <div className="flex items-start justify-between gap-3">
                     <DrawerHeader className="space-y-1">
@@ -28,7 +28,7 @@ export function RulesPanel() {
                     </DrawerClose>
                 </div>
 
-                <section className="space-y-2 text-sm text-slate-200">
+                <section className="space-y-2 py-3 text-sm text-slate-200 ">
                     <h3 className="text-xs font-bold uppercase tracking-wide text-cyan-200">
                         Core Rules
                     </h3>
@@ -46,7 +46,7 @@ export function RulesPanel() {
                     </p>
                 </section>
 
-                <section className="space-y-2 text-sm text-slate-200">
+                <section className="space-y-2 py-3 text-sm text-slate-200">
                     <h3 className="text-xs font-bold uppercase tracking-wide text-cyan-200">
                         Punchouts
                     </h3>
@@ -64,7 +64,7 @@ export function RulesPanel() {
                     </p>
                 </section>
 
-                <section className="space-y-2 text-sm text-slate-200">
+                <section className="space-y-2 py-3 text-sm text-slate-200">
                     <h3 className="text-xs font-bold uppercase tracking-wide text-cyan-200">
                         Invalid Submissions
                     </h3>
@@ -82,7 +82,7 @@ export function RulesPanel() {
                     </p>
                 </section>
 
-                <section className="space-y-2 text-sm text-slate-200">
+                <section className="space-y-2 py-3 text-sm text-slate-200">
                     <h3 className="text-xs font-bold uppercase tracking-wide text-cyan-200">
                         Points System
                     </h3>
