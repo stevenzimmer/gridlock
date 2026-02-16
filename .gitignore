@@ -2,3 +2,6 @@ node_modules
 .env.*
 .next
 agents.md
+# Local SQLite DB
+data/gravity-grid.sqlite
+data/gravity-grid.sqlite-*
