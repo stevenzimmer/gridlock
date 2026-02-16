@@ -17,7 +17,7 @@ export async function GET(request: Request) {
 
   try {
     const current = await getOrCreatePlayerState(playerId);
-    const username = getPlayerUsername(playerId);
+    const username = await getPlayerUsername(playerId);
     return NextResponse.json({ ...current, username });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load game state";

@@ -15,17 +15,19 @@ import { DICTIONARY_BY_LENGTH } from "@/lib/dictionary";
 import { getDateKey } from "@/lib/server/date";
 import { getDb } from "@/lib/server/db";
 import { getOpenAIClient, getOpenAIModel } from "@/lib/server/openai";
+import { dailyBoards, playerDailyState, playerProfiles } from "@/lib/server/schema";
+import { and, eq, sql } from "drizzle-orm";
 
 type BoardRow = {
   date_key: string;
-  grid_json: string;
-  valid_words_json: string;
+  grid_json: unknown;
+  valid_words_json: unknown;
   prompt_version: string;
 };
 
 type PlayerStateRow = {
-  state_json: string;
-  completed: number;
+  state_json: unknown;
+  completed: boolean;
 };
 
 export type LeaderboardEntry = {
@@ -47,11 +49,15 @@ type LeaderboardRow = {
   level: number | null;
   words_cleared: number | null;
   longest_word: string | null;
-  updated_at: string;
+  updated_at: unknown;
 };
 
 type PlayerProfileRow = {
   username: string | null;
+};
+
+type PgError = {
+  code?: string;
 };
 
 export class UsernameAlreadyExistsError extends Error {
@@ -278,8 +284,22 @@ function resolvePatternWithDictionary(pattern: string): string | null {
   return null;
 }
 
+function parseJsonValue<T>(value: unknown, fallback: T): T {
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value) as T;
+    } catch {
+      return fallback;
+    }
+  }
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+  return value as T;
+}
+
 function parseBoardValidWords(row: BoardRow): string[] {
-  const parsed = JSON.parse(row.valid_words_json || "[]");
+  const parsed = parseJsonValue<unknown>(row.valid_words_json, []);
   if (!Array.isArray(parsed)) {
     return [];
   }
@@ -287,6 +307,25 @@ function parseBoardValidWords(row: BoardRow): string[] {
     .filter((value): value is string => typeof value === "string")
     .map((value) => value.toUpperCase())
     .filter((value) => /^[A-Z]+$/.test(value) && value.length >= MIN_WORD_LENGTH);
+}
+
+function isPostgresUniqueViolation(error: unknown): boolean {
+  return Boolean(
+    typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as PgError).code === "23505"
+  );
+}
+
+function asIsoTimestamp(value: unknown): string {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  return new Date().toISOString();
 }
 
 function createInitialStateFromBoard(grid: Tile[][]): GameState {
@@ -330,25 +369,38 @@ export async function ensureDailyBoard(dateKey = getDateKey()): Promise<Tile[][]
     const generated = await generateBoardWithOpenAI(dateKey);
     const validWords = computeValidWordsFromBoard(gridToBoardLetters(generated));
 
-    db.prepare(
-      `INSERT INTO daily_boards (date_key, grid_json, valid_words_json, model, prompt_version)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(date_key) DO UPDATE SET
-         grid_json = excluded.grid_json,
-         valid_words_json = excluded.valid_words_json,
-         model = excluded.model,
-         prompt_version = excluded.prompt_version`
-    ).run(dateKey, JSON.stringify(generated), JSON.stringify(validWords), getOpenAIModel(), BOARD_PROMPT_VERSION);
+    await db
+      .insert(dailyBoards)
+      .values({
+        dateKey,
+        gridJson: generated,
+        validWordsJson: validWords,
+        model: getOpenAIModel(),
+        promptVersion: BOARD_PROMPT_VERSION
+      })
+      .onConflictDoUpdate({
+        target: dailyBoards.dateKey,
+        set: {
+          gridJson: generated,
+          validWordsJson: validWords,
+          model: getOpenAIModel(),
+          promptVersion: BOARD_PROMPT_VERSION
+        }
+      });
 
     return generated;
   };
 
-  const existing = db
-    .prepare("SELECT date_key, grid_json, valid_words_json, prompt_version FROM daily_boards WHERE date_key = ?")
-    .get(dateKey) as BoardRow | undefined;
+  const existing = await db.execute<BoardRow>(sql`
+    SELECT date_key, grid_json, valid_words_json, prompt_version
+    FROM daily_boards
+    WHERE date_key = ${dateKey}
+    LIMIT 1
+  `);
+  const existingRow = existing.rows[0];
 
-  if (existing) {
-    const existingGridRaw = JSON.parse(existing.grid_json) as unknown;
+  if (existingRow) {
+    const existingGridRaw = parseJsonValue<unknown>(existingRow.grid_json, null);
     if (!isTileGridShape(existingGridRaw)) {
       return generateAndPersistBoard();
     }
@@ -357,24 +409,31 @@ export async function ensureDailyBoard(dateKey = getDateKey()): Promise<Tile[][]
     if (hasHorizontalVowelRun(existingGrid)) {
       const constrained = enforceBoardVowelRule(existingGrid, dateKey);
       const constrainedWords = computeValidWordsFromBoard(gridToBoardLetters(constrained));
-      db.prepare(
-        "UPDATE daily_boards SET grid_json = ?, valid_words_json = ?, prompt_version = ? WHERE date_key = ?"
-      ).run(JSON.stringify(constrained), JSON.stringify(constrainedWords), BOARD_PROMPT_VERSION, dateKey);
+      await db
+        .update(dailyBoards)
+        .set({
+          gridJson: constrained,
+          validWordsJson: constrainedWords,
+          promptVersion: BOARD_PROMPT_VERSION
+        })
+        .where(eq(dailyBoards.dateKey, dateKey));
       return constrained;
     }
 
-    const existingWords = parseBoardValidWords(existing);
-    if (existingWords.length > 0 && existing.prompt_version === BOARD_PROMPT_VERSION) {
+    const existingWords = parseBoardValidWords(existingRow);
+    if (existingWords.length > 0 && existingRow.prompt_version === BOARD_PROMPT_VERSION) {
       return existingGrid;
     }
 
     const boardLetters = gridToBoardLetters(existingGrid);
     const backfilledWords = computeValidWordsFromBoard(boardLetters);
-    db.prepare("UPDATE daily_boards SET valid_words_json = ?, prompt_version = ? WHERE date_key = ?").run(
-      JSON.stringify(backfilledWords),
-      BOARD_PROMPT_VERSION,
-      dateKey
-    );
+    await db
+      .update(dailyBoards)
+      .set({
+        validWordsJson: backfilledWords,
+        promptVersion: BOARD_PROMPT_VERSION
+      })
+      .where(eq(dailyBoards.dateKey, dateKey));
     return existingGrid;
   }
   return generateAndPersistBoard();
@@ -387,26 +446,34 @@ export async function getOrCreatePlayerState(
   const db = getDb();
   await ensureDailyBoard(dateKey);
 
-  const existing = db
-    .prepare("SELECT state_json, completed FROM player_daily_state WHERE date_key = ? AND player_id = ?")
-    .get(dateKey, playerId) as PlayerStateRow | undefined;
+  const existingRows = await db.execute<PlayerStateRow>(sql`
+    SELECT state_json, completed
+    FROM player_daily_state
+    WHERE date_key = ${dateKey} AND player_id = ${playerId}
+    LIMIT 1
+  `);
+  const existing = existingRows.rows[0];
 
   if (existing) {
-    const parsed = JSON.parse(existing.state_json) as unknown;
+    const parsed = parseJsonValue<unknown>(existing.state_json, null);
     if (isGameStateShape(parsed)) {
       const normalizedState = normalizeStoredState(parsed);
       const stateWasNormalized = normalizedState.punchoutsRemaining !== parsed.punchoutsRemaining;
 
       if (!hasHorizontalVowelRun(normalizedState.grid)) {
         if (stateWasNormalized) {
-          db.prepare(
-            "UPDATE player_daily_state SET state_json = ?, updated_at = CURRENT_TIMESTAMP WHERE date_key = ? AND player_id = ?"
-          ).run(JSON.stringify(normalizedState), dateKey, playerId);
+          await db
+            .update(playerDailyState)
+            .set({
+              stateJson: normalizedState,
+              updatedAt: sql`now()`
+            })
+            .where(and(eq(playerDailyState.dateKey, dateKey), eq(playerDailyState.playerId, playerId)));
         }
         return {
           dateKey,
           state: normalizedState,
-          completed: existing.completed === 1
+          completed: existing.completed
         };
       }
 
@@ -414,22 +481,31 @@ export async function getOrCreatePlayerState(
         ...normalizedState,
         grid: enforceBoardVowelRule(normalizedState.grid, `${dateKey}:${playerId}`)
       };
-      db.prepare(
-        "UPDATE player_daily_state SET state_json = ?, updated_at = CURRENT_TIMESTAMP WHERE date_key = ? AND player_id = ?"
-      ).run(JSON.stringify(constrainedState), dateKey, playerId);
+      await db
+        .update(playerDailyState)
+        .set({
+          stateJson: constrainedState,
+          updatedAt: sql`now()`
+        })
+        .where(and(eq(playerDailyState.dateKey, dateKey), eq(playerDailyState.playerId, playerId)));
 
       return {
         dateKey,
         state: constrainedState,
-        completed: existing.completed === 1
+        completed: existing.completed
       };
     }
 
     const board = await ensureDailyBoard(dateKey);
     const resetState = createInitialStateFromBoard(board);
-    db.prepare(
-      "UPDATE player_daily_state SET state_json = ?, completed = 0, updated_at = CURRENT_TIMESTAMP WHERE date_key = ? AND player_id = ?"
-    ).run(JSON.stringify(resetState), dateKey, playerId);
+    await db
+      .update(playerDailyState)
+      .set({
+        stateJson: resetState,
+        completed: false,
+        updatedAt: sql`now()`
+      })
+      .where(and(eq(playerDailyState.dateKey, dateKey), eq(playerDailyState.playerId, playerId)));
 
     return {
       dateKey,
@@ -442,20 +518,27 @@ export async function getOrCreatePlayerState(
   const state = createInitialStateFromBoard(board);
 
   try {
-    db.prepare(
-      "INSERT INTO player_daily_state (date_key, player_id, state_json, completed) VALUES (?, ?, ?, 0)"
-    ).run(dateKey, playerId, JSON.stringify(state));
+    await db.insert(playerDailyState).values({
+      dateKey,
+      playerId,
+      stateJson: state,
+      completed: false
+    });
   } catch {
-    const nowExisting = db
-      .prepare("SELECT state_json, completed FROM player_daily_state WHERE date_key = ? AND player_id = ?")
-      .get(dateKey, playerId) as PlayerStateRow | undefined;
+    const nowExistingRows = await db.execute<PlayerStateRow>(sql`
+      SELECT state_json, completed
+      FROM player_daily_state
+      WHERE date_key = ${dateKey} AND player_id = ${playerId}
+      LIMIT 1
+    `);
+    const nowExisting = nowExistingRows.rows[0];
     if (nowExisting) {
-      const parsed = JSON.parse(nowExisting.state_json) as unknown;
+      const parsed = parseJsonValue<unknown>(nowExisting.state_json, null);
       const normalized = isGameStateShape(parsed) ? normalizeStoredState(parsed) : state;
       return {
         dateKey,
         state: normalized,
-        completed: nowExisting.completed === 1
+        completed: nowExisting.completed
       };
     }
     throw new Error(`Failed to create player state for ${playerId}.`);
@@ -508,9 +591,14 @@ export async function submitPlayerSelection(
     };
     const completed = nextState.gameOver;
 
-    db.prepare(
-      "UPDATE player_daily_state SET state_json = ?, completed = ?, updated_at = CURRENT_TIMESTAMP WHERE date_key = ? AND player_id = ?"
-    ).run(JSON.stringify(nextState), completed ? 1 : 0, dateKey, playerId);
+    await db
+      .update(playerDailyState)
+      .set({
+        stateJson: nextState,
+        completed,
+        updatedAt: sql`now()`
+      })
+      .where(and(eq(playerDailyState.dateKey, dateKey), eq(playerDailyState.playerId, playerId)));
 
     const remaining = Math.max(0, MAX_INVALID_SUBMISSIONS - nextInvalidWordsSubmitted);
     return {
@@ -530,9 +618,14 @@ export async function submitPlayerSelection(
 
   const completed = next.state.gameOver;
 
-  db.prepare(
-    "UPDATE player_daily_state SET state_json = ?, completed = ?, updated_at = CURRENT_TIMESTAMP WHERE date_key = ? AND player_id = ?"
-  ).run(JSON.stringify(next.state), completed ? 1 : 0, dateKey, playerId);
+  await db
+    .update(playerDailyState)
+    .set({
+      stateJson: next.state,
+      completed,
+      updatedAt: sql`now()`
+    })
+    .where(and(eq(playerDailyState.dateKey, dateKey), eq(playerDailyState.playerId, playerId)));
 
   return {
     dateKey,
@@ -573,9 +666,14 @@ export async function submitPlayerPunchout(
     };
   }
 
-  db.prepare(
-    "UPDATE player_daily_state SET state_json = ?, completed = ?, updated_at = CURRENT_TIMESTAMP WHERE date_key = ? AND player_id = ?"
-  ).run(JSON.stringify(next.state), current.completed ? 1 : 0, dateKey, playerId);
+  await db
+    .update(playerDailyState)
+    .set({
+      stateJson: next.state,
+      completed: current.completed,
+      updatedAt: sql`now()`
+    })
+    .where(and(eq(playerDailyState.dateKey, dateKey), eq(playerDailyState.playerId, playerId)));
 
   return {
     dateKey,
@@ -586,34 +684,43 @@ export async function submitPlayerPunchout(
   };
 }
 
-export function getPlayerUsername(playerId: string): string | null {
+export async function getPlayerUsername(playerId: string): Promise<string | null> {
   const db = getDb();
-  const row = db
-    .prepare("SELECT username FROM player_profiles WHERE player_id = ?")
-    .get(playerId) as PlayerProfileRow | undefined;
+  const rows = await db
+    .select({
+      username: playerProfiles.username
+    })
+    .from(playerProfiles)
+    .where(eq(playerProfiles.playerId, playerId))
+    .limit(1);
+  const row = rows[0] as PlayerProfileRow | undefined;
   const username = row?.username?.trim();
   return username ? username : null;
 }
 
-export function upsertPlayerUsername(playerId: string, username: string | null): string | null {
+export async function upsertPlayerUsername(
+  playerId: string,
+  username: string | null
+): Promise<string | null> {
   const db = getDb();
   const normalizedUsername = username?.trim() || null;
 
   try {
-    db.prepare(
-      `INSERT INTO player_profiles (player_id, username)
-       VALUES (?, ?)
-       ON CONFLICT(player_id) DO UPDATE SET
-         username = excluded.username,
-         updated_at = CURRENT_TIMESTAMP`
-    ).run(playerId, normalizedUsername);
+    await db
+      .insert(playerProfiles)
+      .values({
+        playerId,
+        username: normalizedUsername
+      })
+      .onConflictDoUpdate({
+        target: playerProfiles.playerId,
+        set: {
+          username: normalizedUsername,
+          updatedAt: sql`now()`
+        }
+      });
   } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      error.code === "SQLITE_CONSTRAINT_UNIQUE"
-    ) {
+    if (isPostgresUniqueViolation(error)) {
       throw new UsernameAlreadyExistsError();
     }
     throw error;
@@ -622,26 +729,30 @@ export function upsertPlayerUsername(playerId: string, username: string | null):
   return normalizedUsername;
 }
 
-export function getLeaderboard(limit = 10): LeaderboardEntry[] {
+export async function getLeaderboard(limit = 10): Promise<LeaderboardEntry[]> {
   const db = getDb();
   const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
-  const rows = db
-    .prepare(
-      `SELECT
-         pds.player_id,
-         pp.username,
-         pds.date_key,
-         CAST(COALESCE(json_extract(pds.state_json, '$.score'), 0) AS INTEGER) AS score,
-         CAST(COALESCE(json_extract(pds.state_json, '$.level'), 1) AS INTEGER) AS level,
-         CAST(COALESCE(json_extract(pds.state_json, '$.stats.wordsCleared'), 0) AS INTEGER) AS words_cleared,
-         CAST(COALESCE(json_extract(pds.state_json, '$.stats.longestWord'), '') AS TEXT) AS longest_word,
-         pds.updated_at
-       FROM player_daily_state AS pds
-       LEFT JOIN player_profiles AS pp ON pp.player_id = pds.player_id
-       ORDER BY score DESC, level DESC, words_cleared DESC, LENGTH(longest_word) DESC, pds.updated_at ASC
-       LIMIT ?`
-    )
-    .all(safeLimit) as LeaderboardRow[];
+  const rowsResult = await db.execute<LeaderboardRow>(sql`
+    SELECT
+      pds.player_id,
+      pp.username,
+      pds.date_key,
+      CAST(COALESCE(pds.state_json->>'score', '0') AS INTEGER) AS score,
+      CAST(COALESCE(pds.state_json->>'level', '1') AS INTEGER) AS level,
+      CAST(COALESCE(pds.state_json->'stats'->>'wordsCleared', '0') AS INTEGER) AS words_cleared,
+      CAST(COALESCE(pds.state_json->'stats'->>'longestWord', '') AS TEXT) AS longest_word,
+      pds.updated_at
+    FROM player_daily_state AS pds
+    LEFT JOIN player_profiles AS pp ON pp.player_id = pds.player_id
+    ORDER BY
+      CAST(COALESCE(pds.state_json->>'score', '0') AS INTEGER) DESC,
+      CAST(COALESCE(pds.state_json->>'level', '1') AS INTEGER) DESC,
+      CAST(COALESCE(pds.state_json->'stats'->>'wordsCleared', '0') AS INTEGER) DESC,
+      LENGTH(COALESCE(pds.state_json->'stats'->>'longestWord', '')) DESC,
+      pds.updated_at ASC
+    LIMIT ${safeLimit}
+  `);
+  const rows = rowsResult.rows;
 
   return rows.map((row) => ({
     playerId: row.player_id,
@@ -651,6 +762,6 @@ export function getLeaderboard(limit = 10): LeaderboardEntry[] {
     level: row.level ?? 1,
     wordsCleared: row.words_cleared ?? 0,
     longestWord: row.longest_word ?? "",
-    updatedAt: row.updated_at
+    updatedAt: asIsoTimestamp(row.updated_at)
   }));
 }

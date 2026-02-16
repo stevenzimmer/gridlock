@@ -18,7 +18,7 @@ export function TileView({
   cursor
 }: TileViewProps) {
   let label = "";
-  let tone = "bg-slate-800/30 border-slate-700/50";
+  let tone = "bg-white border-slate-700";
 
   if (tile.kind === "stone") {
     label = "■";

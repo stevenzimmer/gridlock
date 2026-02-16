@@ -34,7 +34,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const username = upsertPlayerUsername(
+    const username = await upsertPlayerUsername(
       playerId,
       normalizedUsername.length > 0 ? normalizedUsername : null
     );

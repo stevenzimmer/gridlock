@@ -3,8 +3,8 @@ import {getLeaderboard} from "@/lib/server/game-service";
 
 export const dynamic = "force-dynamic";
 
-export default function LeaderboardPage() {
-    const leaderboard = getLeaderboard(10);
+export default async function LeaderboardPage() {
+    const leaderboard = await getLeaderboard(10);
 
     return (
         <main className="mx-auto min-h-screen w-full max-w-5xl px-3 py-6 sm:px-6 sm:py-8">
