@@ -168,17 +168,17 @@ async function generateBoardWithOpenAI(dateKey: string): Promise<Tile[][]> {
       {
         role: "system",
         content:
-          "You generate puzzle boards. Return only valid JSON matching the required schema. Use uppercase A-Z and at most two '*' wildcards total."
+          "You generate puzzle boards. Return only valid JSON matching the required schema. Use uppercase A-Z and at least five '*' wildcards, no more than 8 total wildcards in a board. Wildcards should never be continuous in the same row. The letters generated for a board should be based on realistic English letter frequency. Letters should appear in proportion to how often they are used in common English words. Vowels and high-frequency consonants (E, T, A, O, I, N, R, S, H, L, D) should appear often, while rare letters (Q, Z, X, J, K) should appear infrequently. Do not use a uniform distribution. Use standard English letter frequency as the probability model."
       },
       {
         role: "user",
         content:
           `Generate the Grid Lock board for ${dateKey}. Rules:\n` +
           `- Grid size: ${GRID_ROWS} rows x ${GRID_COLS} cols\n` +
-          "- Characters: A-Z and optional '*' wildcard\n" +
+          "- Characters: A-Z and '*' wildcard\n" +
           "- Use a balanced vowel/consonant distribution\n" +
           "- Never place more than two consecutive vowels horizontally in any row\n" +
-          "- Max 2 wildcards in the full grid\n" +
+          "- Max 8 wildcards in the full grid\n" +
           "- Return only JSON."
       }
     ],
