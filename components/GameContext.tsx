@@ -9,6 +9,11 @@ import { normalizeSelection, selectionToDisplay } from "@/lib/game";
 import { isValidUsername, normalizeUsername } from "@/lib/username";
 import type { GameState, Position, ProfilePayload, StatePayload, SubmitPayload } from "@/lib/types";
 
+type SettleEffect = {
+  dropRows: number;
+  spawned: boolean;
+};
+
 type GameContextValue = {
   playerId: string;
   playerDisplayName: string;
@@ -25,6 +30,7 @@ type GameContextValue = {
   lastWord: string;
   loading: boolean;
   disabled: boolean;
+  gameOver: boolean;
   selectedDisplay: string;
   canSubmitSelection: boolean;
   message: string | null;
@@ -34,6 +40,10 @@ type GameContextValue = {
   selection: Position[];
   invalidSelection: Position[];
   markedInvalidSelection: Position[];
+  clearingSelection: Position[];
+  settlingEffects: Record<string, SettleEffect>;
+  settleNonce: number;
+  clearingRow: number | null;
   cursor: Position;
   setUsernameDraft: (value: string) => void;
   submitSelection: () => Promise<void>;
@@ -47,6 +57,9 @@ type GameContextValue = {
 
 const GameContext = createContext<GameContextValue | null>(null);
 
+const CLEAR_ANIMATION_MS = 220;
+const SETTLE_ANIMATION_MS = 260;
+
 export function GameProvider({ children }: { children: ReactNode }) {
   const [playerId, setPlayerId] = useState<string>("");
   const [username, setUsername] = useState<string | null>(null);
@@ -56,6 +69,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [selection, setSelection] = useState<Position[]>([]);
   const [invalidSelection, setInvalidSelection] = useState<Position[]>([]);
   const [markedInvalidSelection, setMarkedInvalidSelection] = useState<Position[]>([]);
+  const [clearingSelection, setClearingSelection] = useState<Position[]>([]);
+  const [settlingEffects, setSettlingEffects] = useState<Record<string, SettleEffect>>({});
+  const [settleNonce, setSettleNonce] = useState(0);
+  const [clearingRow, setClearingRow] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>("Loading daily board...");
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [cursor, setCursor] = useState<Position>({ row: GRID_ROWS - 1, col: 0 });
@@ -70,7 +87,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const anchorRef = useRef<Position | null>(null);
   const selectionRef = useRef<Position[]>([]);
 
-  const disabled = loadingState || submitting || completed || !gameState;
+  const disabled = loadingState || completed || !gameState;
 
   const loadStateForPlayer = useCallback(
     async (pid: string) => {
@@ -88,6 +105,9 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setUsername(payload.username ?? null);
       setUsernameDraft(payload.username ?? "");
       setMarkedInvalidSelection([]);
+      setClearingSelection([]);
+      setSettlingEffects({});
+      setClearingRow(null);
       setSelection([]);
       setInvalidSelection([]);
       selectionRef.current = [];
@@ -190,7 +210,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
   }, [gameState, selection]);
 
   const runSubmit = useCallback(async () => {
-    if (!gameState || disabled) {
+    if (!gameState || disabled || submitting) {
       return;
     }
 
@@ -201,6 +221,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
     setSubmitting(true);
     const gridBeforeSubmit = gameState.grid;
+    let shouldRunSettleAnimation = false;
     try {
       const response = await fetch("/api/game/submit", {
         method: "POST",
@@ -220,15 +241,27 @@ export function GameProvider({ children }: { children: ReactNode }) {
       }
 
       setDateKey(payload.dateKey);
-      setGameState(payload.state);
-      setCompleted(payload.completed);
-      if (!payload.accepted && payload.message.startsWith("Invalid word.")) {
-        setMessage(null);
-      } else {
-        setMessage(payload.message);
-      }
 
       if (payload.accepted) {
+        const row = activeSelection[0]?.row ?? null;
+        const rowCanFlash =
+          row !== null &&
+          row >= 0 &&
+          row < gridBeforeSubmit.length &&
+          gridBeforeSubmit[row].every((tile) => tile.kind !== "stone") &&
+          activeSelection.length === gridBeforeSubmit[row].length;
+
+        if (activeSelection.length > 0) {
+          setClearingSelection(activeSelection);
+          setClearingRow(rowCanFlash ? row : null);
+          await delay(CLEAR_ANIMATION_MS);
+        }
+
+        setClearingSelection([]);
+        setClearingRow(null);
+        setGameState(payload.state);
+        setCompleted(payload.completed);
+        setMessage(payload.message);
         setInvalidSelection([]);
         setMarkedInvalidSelection((previousMarked) =>
           pruneMarkedInvalidPositions(previousMarked, gridBeforeSubmit, activeSelection, payload.state.grid)
@@ -237,10 +270,20 @@ export function GameProvider({ children }: { children: ReactNode }) {
         if (matchedWord?.[1]) {
           setLastWord(matchedWord[1]);
         }
+        setSettlingEffects(getSettleEffects(gridBeforeSubmit, payload.state.grid, activeSelection));
+        setSettleNonce((value) => value + 1);
+        shouldRunSettleAnimation = true;
         selectionRef.current = [];
         setSelection([]);
         anchorRef.current = null;
       } else {
+        setGameState(payload.state);
+        setCompleted(payload.completed);
+        if (!payload.accepted && payload.message.startsWith("Invalid word.")) {
+          setMessage(null);
+        } else {
+          setMessage(payload.message);
+        }
         setInvalidSelection(activeSelection);
         setMarkedInvalidSelection((previousMarked) => dedupePositions([...previousMarked, ...activeSelection]));
       }
@@ -248,17 +291,23 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setMessage(error instanceof Error ? error.message : "Failed to submit selection.");
     } finally {
       setSubmitting(false);
+      if (shouldRunSettleAnimation) {
+        window.setTimeout(() => {
+          setSettlingEffects({});
+        }, SETTLE_ANIMATION_MS);
+      }
     }
-  }, [disabled, gameState, playerId, userTimeZone]);
+  }, [disabled, gameState, playerId, submitting, userTimeZone]);
 
   const runPunchout = useCallback(
     async (row: number, col: number) => {
-      if (!gameState || disabled) {
+      if (!gameState || disabled || submitting) {
         return;
       }
 
       setSubmitting(true);
       const gridBeforePunchout = gameState.grid;
+      let shouldRunSettleAnimation = false;
       try {
         const response = await fetch("/api/game/punchout", {
           method: "POST",
@@ -278,9 +327,19 @@ export function GameProvider({ children }: { children: ReactNode }) {
         }
 
         setDateKey(payload.dateKey);
+        if (payload.accepted) {
+          setClearingSelection([{ row, col }]);
+          await delay(CLEAR_ANIMATION_MS);
+          setClearingSelection([]);
+        }
         setGameState(payload.state);
         setCompleted(payload.completed);
         setMessage(payload.message);
+        if (payload.accepted) {
+          setSettlingEffects(getSettleEffects(gridBeforePunchout, payload.state.grid, [{ row, col }]));
+          setSettleNonce((value) => value + 1);
+          shouldRunSettleAnimation = true;
+        }
         setSelection([]);
         setInvalidSelection([]);
         setMarkedInvalidSelection((previousMarked) =>
@@ -294,9 +353,14 @@ export function GameProvider({ children }: { children: ReactNode }) {
         setMessage(error instanceof Error ? error.message : "Failed to use punchout.");
       } finally {
         setSubmitting(false);
+        if (shouldRunSettleAnimation) {
+          window.setTimeout(() => {
+            setSettlingEffects({});
+          }, SETTLE_ANIMATION_MS);
+        }
       }
     },
-    [disabled, gameState, playerId, userTimeZone]
+    [disabled, gameState, playerId, submitting, userTimeZone]
   );
 
   const onCellPointerDown = useCallback(
@@ -456,7 +520,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
     completed,
     lastWord,
     loading: loadingState || submitting,
-    disabled: completed || Boolean(gameState?.gameOver),
+    disabled: disabled || Boolean(gameState?.gameOver),
+    gameOver: Boolean(gameState?.gameOver),
     selectedDisplay,
     canSubmitSelection,
     message,
@@ -466,6 +531,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
     selection,
     invalidSelection,
     markedInvalidSelection,
+    clearingSelection,
+    settlingEffects,
+    settleNonce,
+    clearingRow,
     cursor,
     setUsernameDraft,
     submitSelection: runSubmit,
@@ -478,6 +547,82 @@ export function GameProvider({ children }: { children: ReactNode }) {
   };
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function getSettleEffects(
+  before: GameState["grid"],
+  after: GameState["grid"],
+  removed: Position[]
+): Record<string, SettleEffect> {
+  const effects: Record<string, SettleEffect> = {};
+  const rows = after.length;
+  const cols = after[0]?.length ?? 0;
+
+  const removedByCol = new Map<number, Set<number>>();
+  for (const position of removed) {
+    if (!removedByCol.has(position.col)) {
+      removedByCol.set(position.col, new Set<number>());
+    }
+    removedByCol.get(position.col)?.add(position.row);
+  }
+
+  for (let col = 0; col < cols; col++) {
+    const removedRows = removedByCol.get(col) ?? new Set<number>();
+    let segmentTop = 0;
+
+    while (segmentTop < rows) {
+      let segmentBottom = segmentTop;
+      while (segmentBottom < rows && before[segmentBottom][col].kind !== "stone") {
+        segmentBottom++;
+      }
+
+      const remainingBeforeRows: number[] = [];
+      const afterRows: number[] = [];
+
+      for (let row = segmentTop; row < segmentBottom; row++) {
+        if (before[row][col].kind === "letter" && !removedRows.has(row)) {
+          remainingBeforeRows.push(row);
+        }
+        if (after[row][col].kind === "letter") {
+          afterRows.push(row);
+        }
+      }
+
+      const existingCount = Math.min(remainingBeforeRows.length, afterRows.length);
+      const targetRowsForExisting = afterRows.slice(afterRows.length - existingCount);
+
+      for (let i = 0; i < existingCount; i++) {
+        const sourceRow = remainingBeforeRows[i];
+        const targetRow = targetRowsForExisting[i];
+        const dropRows = targetRow - sourceRow;
+        if (dropRows > 0) {
+          effects[`${targetRow}:${col}`] = {
+            dropRows,
+            spawned: false
+          };
+        }
+      }
+
+      const spawnCount = afterRows.length - existingCount;
+      for (let i = 0; i < spawnCount; i++) {
+        const targetRow = afterRows[i];
+        effects[`${targetRow}:${col}`] = {
+          dropRows: Math.max(1, targetRow - segmentTop + 1),
+          spawned: true
+        };
+      }
+
+      segmentTop = segmentBottom + 1;
+    }
+  }
+
+  return effects;
 }
 
 export function useGameContext() {

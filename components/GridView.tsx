@@ -9,9 +9,14 @@ export function GridView() {
     const {
         grid,
         disabled,
+        gameOver,
         selection,
         invalidSelection,
         markedInvalidSelection,
+        clearingSelection,
+        settlingEffects,
+        settleNonce,
+        clearingRow,
         cursor,
         onCellPointerDown,
         onCellPointerEnter,
@@ -65,6 +70,7 @@ export function GridView() {
     const markedInvalidKeys = new Set(
         markedInvalidSelection.map((p) => `${p.row}:${p.col}`),
     );
+    const clearingKeys = new Set(clearingSelection.map((p) => `${p.row}:${p.col}`));
 
     return (
         <div
@@ -92,6 +98,8 @@ export function GridView() {
                         const selected = selectedKeys.has(key);
                         const invalid = invalidKeys.has(key);
                         const markedInvalid = markedInvalidKeys.has(key);
+                        const clearing = clearingKeys.has(key);
+                        const settleEffect = settlingEffects[key];
                         const isCursor =
                             cursor.row === rowIdx && cursor.col === colIdx;
                         const aria =
@@ -141,6 +149,10 @@ export function GridView() {
                                     selected={selected}
                                     invalid={invalid}
                                     markedInvalid={markedInvalid}
+                                    clearing={clearing}
+                                    settleEffect={settleEffect}
+                                    settleNonce={settleNonce}
+                                    rowFlashing={clearingRow === rowIdx}
                                     cursor={isCursor}
                                 />
                             </button>
@@ -148,7 +160,7 @@ export function GridView() {
                     }),
                 )}
             </div>
-            {disabled ? <GameOverlay /> : null}
+            {gameOver ? <GameOverlay /> : null}
         </div>
     );
 }
