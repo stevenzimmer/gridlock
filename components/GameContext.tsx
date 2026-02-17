@@ -64,6 +64,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [submitting, setSubmitting] = useState(false);
   const [savingUsername, setSavingUsername] = useState(false);
   const [completed, setCompleted] = useState(false);
+  const userTimeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", []);
 
   const draggingRef = useRef(false);
   const anchorRef = useRef<Position | null>(null);
@@ -71,25 +72,30 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
   const disabled = loadingState || submitting || completed || !gameState;
 
-  const loadStateForPlayer = useCallback(async (pid: string) => {
-    const response = await fetch(`/api/game/state?playerId=${encodeURIComponent(pid)}`);
-    const payload = (await response.json()) as StatePayload | { error: string };
-    if (!response.ok || "error" in payload) {
-      throw new Error((payload as { error: string }).error || "Failed to load game state");
-    }
+  const loadStateForPlayer = useCallback(
+    async (pid: string) => {
+      const response = await fetch(
+        `/api/game/state?playerId=${encodeURIComponent(pid)}&timeZone=${encodeURIComponent(userTimeZone)}`
+      );
+      const payload = (await response.json()) as StatePayload | { error: string };
+      if (!response.ok || "error" in payload) {
+        throw new Error((payload as { error: string }).error || "Failed to load game state");
+      }
 
-    setDateKey(payload.dateKey);
-    setGameState(payload.state);
-    setCompleted(payload.completed);
-    setUsername(payload.username ?? null);
-    setUsernameDraft(payload.username ?? "");
-    setMarkedInvalidSelection([]);
-    setSelection([]);
-    setInvalidSelection([]);
-    selectionRef.current = [];
-    anchorRef.current = null;
-    setMessage(payload.completed ? "Daily run completed." : null);
-  }, []);
+      setDateKey(payload.dateKey);
+      setGameState(payload.state);
+      setCompleted(payload.completed);
+      setUsername(payload.username ?? null);
+      setUsernameDraft(payload.username ?? "");
+      setMarkedInvalidSelection([]);
+      setSelection([]);
+      setInvalidSelection([]);
+      selectionRef.current = [];
+      anchorRef.current = null;
+      setMessage(payload.completed ? "Daily run completed." : null);
+    },
+    [userTimeZone]
+  );
 
   useEffect(() => {
     let active = true;
@@ -203,7 +209,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
         },
         body: JSON.stringify({
           playerId,
-          selection: activeSelection
+          selection: activeSelection,
+          timeZone: userTimeZone
         })
       });
 
@@ -242,7 +249,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     } finally {
       setSubmitting(false);
     }
-  }, [disabled, gameState, playerId]);
+  }, [disabled, gameState, playerId, userTimeZone]);
 
   const runPunchout = useCallback(
     async (row: number, col: number) => {
@@ -260,7 +267,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
           },
           body: JSON.stringify({
             playerId,
-            position: { row, col }
+            position: { row, col },
+            timeZone: userTimeZone
           })
         });
 
@@ -288,7 +296,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
         setSubmitting(false);
       }
     },
-    [disabled, gameState, playerId]
+    [disabled, gameState, playerId, userTimeZone]
   );
 
   const onCellPointerDown = useCallback(

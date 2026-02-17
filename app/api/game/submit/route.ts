@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { submitPlayerSelection } from "@/lib/server/game-service";
 import { isValidPlayerId } from "@/lib/player-id";
+import { getDateKeyForTimeZone } from "@/lib/server/date";
 import type { Position } from "@/lib/types";
 
 type SubmitBody = {
   playerId?: string;
   selection?: Position[];
+  timeZone?: string;
 };
 
 export async function POST(request: Request) {
@@ -28,7 +30,7 @@ export async function POST(request: Request) {
   const selection = Array.isArray(body.selection) ? body.selection : [];
 
   try {
-    const result = await submitPlayerSelection(playerId, selection);
+    const result = await submitPlayerSelection(playerId, selection, getDateKeyForTimeZone(body.timeZone));
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to submit selection";

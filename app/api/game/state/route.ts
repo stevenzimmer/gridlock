@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { getOrCreatePlayerState, getPlayerUsername } from "@/lib/server/game-service";
 import { isValidPlayerId } from "@/lib/player-id";
+import { getDateKeyForTimeZone } from "@/lib/server/date";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const playerId = searchParams.get("playerId")?.trim();
+  const timeZone = searchParams.get("timeZone");
 
   if (!playerId) {
     return NextResponse.json({ error: "Missing playerId" }, { status: 400 });
@@ -16,7 +18,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const current = await getOrCreatePlayerState(playerId);
+    const current = await getOrCreatePlayerState(playerId, getDateKeyForTimeZone(timeZone));
     const username = await getPlayerUsername(playerId);
     return NextResponse.json({ ...current, username });
   } catch (error) {

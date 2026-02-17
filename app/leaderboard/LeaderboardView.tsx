@@ -1,13 +1,16 @@
 import Link from "next/link";
-import { getDateKey } from "@/lib/server/date";
+import { getDateKeyForTimeZone, resolveTimeZone } from "@/lib/server/date";
 import { getLeaderboard, getLeaderboardDateKeys } from "@/lib/server/game-service";
 
 type LeaderboardViewProps = {
   dateKey: string;
+  timeZone?: string;
 };
 
-export async function LeaderboardView({ dateKey }: LeaderboardViewProps) {
-  const todayDateKey = getDateKey();
+export async function LeaderboardView({ dateKey, timeZone }: LeaderboardViewProps) {
+  const resolvedTimeZone = resolveTimeZone(timeZone);
+  const todayDateKey = getDateKeyForTimeZone(resolvedTimeZone);
+  const query = timeZone ? { timeZone: resolvedTimeZone } : undefined;
   const [leaderboard, availableDates] = await Promise.all([
     getLeaderboard(10, dateKey),
     getLeaderboardDateKeys(30)
@@ -28,7 +31,7 @@ export async function LeaderboardView({ dateKey }: LeaderboardViewProps) {
         <div className="flex items-center gap-2">
           {dateKey !== todayDateKey ? (
             <Link
-              href="/leaderboard"
+              href={{ pathname: "/leaderboard", query }}
               className="rounded-md border border-cyan-500/40 bg-cyan-900/30 px-3 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-800/40"
             >
               View Today
@@ -52,7 +55,11 @@ export async function LeaderboardView({ dateKey }: LeaderboardViewProps) {
             {previousDates.map((entryDateKey) => (
               <Link
                 key={entryDateKey}
-                href={entryDateKey === todayDateKey ? "/leaderboard" : `/leaderboard/${entryDateKey}`}
+                href={
+                  entryDateKey === todayDateKey
+                    ? { pathname: "/leaderboard", query }
+                    : { pathname: `/leaderboard/${entryDateKey}`, query }
+                }
                 className={`rounded-md border px-2 py-1 text-xs font-semibold ${
                   entryDateKey === dateKey
                     ? "border-cyan-400/50 bg-cyan-900/40 text-cyan-100"

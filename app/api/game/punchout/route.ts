@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { submitPlayerPunchout } from "@/lib/server/game-service";
 import { isValidPlayerId } from "@/lib/player-id";
+import { getDateKeyForTimeZone } from "@/lib/server/date";
 import type { Position } from "@/lib/types";
 
 type PunchoutBody = {
   playerId?: string;
   position?: Position;
+  timeZone?: string;
 };
 
 export async function POST(request: Request) {
@@ -37,7 +39,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await submitPlayerPunchout(playerId, position);
+    const result = await submitPlayerPunchout(playerId, position, getDateKeyForTimeZone(body.timeZone));
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to submit punchout";
