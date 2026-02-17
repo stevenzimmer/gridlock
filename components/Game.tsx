@@ -10,7 +10,7 @@ import {SubmissionsRemaining} from "./SubmissionsRemaining";
 
 function GameContent() {
     const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
-    const {dateKey, grid, message} = useGameContext();
+    const {dateKey} = useGameContext();
 
     return (
         <section className="relative mx-auto w-full max-w-6xl">
@@ -70,13 +70,7 @@ function GameContent() {
                 </div>
 
                 <div className="space-y-3 lg:col-span-2">
-                    {grid ? (
-                        <GridView />
-                    ) : (
-                        <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-6 text-sm text-slate-300">
-                            {message || "Loading..."}
-                        </div>
-                    )}
+                    <GridView />
                 </div>
                 <div className="lg:hidden grid grid-cols-2 gap-2">
                     <Punchouts />

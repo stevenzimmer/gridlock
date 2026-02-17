@@ -3,6 +3,7 @@
 import {useCallback, useRef} from "react";
 import {TileView} from "@/components/TileView";
 import {useGameContext} from "@/components/GameContext";
+import {GRID_COLS, GRID_ROWS} from "@/lib/config";
 import {GameOverlay} from "./GameOverlay";
 
 export function GridView() {
@@ -61,7 +62,32 @@ export function GridView() {
     );
 
     if (!grid) {
-        return null;
+        return (
+            <div
+                className="relative mx-auto w-full rounded-xl bg-slate-900/60 p-2"
+                aria-label="Loading game board"
+                aria-busy="true"
+            >
+                <div className="grid gap-1" style={{gridTemplateColumns: `repeat(${GRID_COLS}, minmax(0, 1fr))`}}>
+                    {Array.from({length: GRID_ROWS * GRID_COLS}, (_, idx) => (
+                        <div
+                            key={`skeleton-${idx}`}
+                            className="aspect-square rounded-md border border-slate-700/80 bg-slate-800/80 animate-pulse"
+                            aria-hidden="true"
+                        />
+                    ))}
+                </div>
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-xl bg-slate-950/45">
+                    <div className="inline-flex items-center gap-3 rounded-full border border-slate-600/80 bg-slate-900/85 px-4 py-2 text-sm font-semibold text-slate-100">
+                        <span
+                            className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-transparent"
+                            aria-hidden="true"
+                        />
+                        <span>Loading</span>
+                    </div>
+                </div>
+            </div>
+        );
     }
     const selectedKeys = new Set(selection.map((p) => `${p.row}:${p.col}`));
     const invalidKeys = new Set(
@@ -91,7 +117,10 @@ export function GridView() {
             ].join(" ")}
             aria-label="Gridlock board"
         >
-            <div className="grid grid-cols-7 gap-1">
+            <div
+                className="grid gap-1"
+                style={{gridTemplateColumns: `repeat(${GRID_COLS}, minmax(0, 1fr))`}}
+            >
                 {grid.map((row, rowIdx) =>
                     row.map((tile, colIdx) => {
                         const key = `${rowIdx}:${colIdx}`;
