@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import "@/app/globals.css";
 
 export const metadata: Metadata = {
-  title: "Grid lock",
+  title: "Gridlock",
   description: "Tetris-style word puzzle MVP"
 };
 

@@ -17,7 +17,7 @@ function GameContent() {
             <div className="mb-3 flex items-center justify-between gap-2 lg:hidden">
                 <div className="">
                     <h1 className="text-2xl font-black tracking-tight text-cyan-100">
-                        Grid Lock
+                        Gridlock
                     </h1>
                     <p className="text-xs text-slate-300">
                         Daily board: {dateKey || "-"}

@@ -1,4 +1,4 @@
-# Grid Lock (Daily OpenAI Mode)
+# Gridlock (Tetris + Scrabble)
 
 This version uses the OpenAI SDK to:
 

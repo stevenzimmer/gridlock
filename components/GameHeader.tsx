@@ -6,7 +6,7 @@ export function GameHeader() {
     return (
         <div className="flex flex-wrap items-center justify-between gap-2">
             <h1 className="text-2xl font-black tracking-tight text-cyan-100 sm:text-3xl">
-                Grid Lock
+                Gridlock
             </h1>
             <div className="flex items-center justify-between gap-2 w-full">
                 <p className="rounded border border-slate-700 bg-slate-900/40 px-3 py-1 text-slate-200">

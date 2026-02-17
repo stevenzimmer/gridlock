@@ -52,6 +52,10 @@ type LeaderboardRow = {
   updated_at: unknown;
 };
 
+type LeaderboardDateRow = {
+  date_key: string;
+};
+
 type PlayerProfileRow = {
   username: string | null;
 };
@@ -729,9 +733,10 @@ export async function upsertPlayerUsername(
   return normalizedUsername;
 }
 
-export async function getLeaderboard(limit = 10): Promise<LeaderboardEntry[]> {
+export async function getLeaderboard(limit = 10, dateKey?: string): Promise<LeaderboardEntry[]> {
   const db = getDb();
   const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  const dateFilter = dateKey?.trim() || null;
   const rowsResult = await db.execute<LeaderboardRow>(sql`
     SELECT
       pds.player_id,
@@ -744,6 +749,7 @@ export async function getLeaderboard(limit = 10): Promise<LeaderboardEntry[]> {
       pds.updated_at
     FROM player_daily_state AS pds
     LEFT JOIN player_profiles AS pp ON pp.player_id = pds.player_id
+    ${dateFilter ? sql`WHERE pds.date_key = ${dateFilter}` : sql``}
     ORDER BY
       CAST(COALESCE(pds.state_json->>'score', '0') AS INTEGER) DESC,
       CAST(COALESCE(pds.state_json->>'level', '1') AS INTEGER) DESC,
@@ -764,4 +770,17 @@ export async function getLeaderboard(limit = 10): Promise<LeaderboardEntry[]> {
     longestWord: row.longest_word ?? "",
     updatedAt: asIsoTimestamp(row.updated_at)
   }));
+}
+
+export async function getLeaderboardDateKeys(limit = 30): Promise<string[]> {
+  const db = getDb();
+  const safeLimit = Math.max(1, Math.min(365, Math.floor(limit)));
+  const rowsResult = await db.execute<LeaderboardDateRow>(sql`
+    SELECT DISTINCT pds.date_key
+    FROM player_daily_state AS pds
+    WHERE CAST(COALESCE(pds.state_json->>'score', '0') AS INTEGER) > 0
+    ORDER BY pds.date_key DESC
+    LIMIT ${safeLimit}
+  `);
+  return rowsResult.rows.map((row) => row.date_key);
 }

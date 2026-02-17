@@ -12,7 +12,7 @@ export function RulesPanel() {
             <div className="space-y-4">
                 <div className="flex items-start justify-between gap-3">
                     <DrawerHeader className="space-y-1">
-                        <DrawerTitle>How Grid Lock Works</DrawerTitle>
+                        <DrawerTitle>How Gridlock Works</DrawerTitle>
                         <DrawerDescription>
                             Build words, clear tiles, and survive the board for
                             the daily run.
