@@ -1,6 +1,11 @@
+import { config as loadEnv } from "dotenv";
 import cron from "node-cron";
 import { ensureDailyBoard } from "../lib/server/game-service";
 import { getDateKey } from "../lib/server/date";
+
+// `tsx` scripts do not automatically load Next.js env files.
+loadEnv({ path: ".env.local" });
+loadEnv();
 
 function tomorrowDateKey(): string {
   const next = new Date();

@@ -10,6 +10,8 @@ export type Position = {
     col: number;
 };
 
+export type RotationDirection = "clockwise" | "counterclockwise";
+
 export type SelectionResult = {
     accepted: boolean;
     selectedWord?: string;

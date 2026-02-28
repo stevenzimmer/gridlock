@@ -2,7 +2,7 @@ export const GRID_COLS = 7;
 export const GRID_ROWS = 7;
 export const MIN_WORD_LENGTH = 3;
 export const MAX_WILDCARDS_PER_WORD = 2;
-export const MAX_INVALID_SUBMISSIONS = 5;
+export const MAX_INVALID_SUBMISSIONS = 3;
 
 export const BASE_TICK_MS = 1400;
 export const MIN_TICK_MS = 450;

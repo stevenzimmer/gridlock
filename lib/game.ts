@@ -13,7 +13,7 @@ import {
   TICK_DECAY_PER_LEVEL,
   WILDCARD_TILE_WEIGHT
 } from "@/lib/config";
-import type { GameState, Grid, Position, SelectionResult, Tile } from "@/lib/types";
+import type { GameState, Grid, Position, RotationDirection, SelectionResult, Tile } from "@/lib/types";
 import type { RNG } from "@/lib/rng";
 
 const LETTER_DISTRIBUTION = "EEEEEEEEEAAAAAAIIIIIOOOOUUUUNNNNNNRRRRRRTTTTTLLLLSSSSDDDDGGGBBCCMMPPFFHHVVWWYYKJXQZ";
@@ -319,6 +319,43 @@ export function buildRangeSelection(
     result.push({ row, col });
   }
   return result;
+}
+
+export function rotateGrid(grid: Grid, direction: RotationDirection): Grid {
+  const rows = grid.length;
+  const cols = grid[0]?.length ?? 0;
+  const rotated = createEmptyGrid(cols, rows);
+
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      if (direction === "clockwise") {
+        rotated[col][rows - 1 - row] = { ...grid[row][col] };
+      } else {
+        rotated[cols - 1 - col][row] = { ...grid[row][col] };
+      }
+    }
+  }
+
+  return rotated;
+}
+
+export function rotatePosition(
+  position: Position,
+  rowCount: number,
+  colCount: number,
+  direction: RotationDirection
+): Position {
+  if (direction === "clockwise") {
+    return {
+      row: position.col,
+      col: rowCount - 1 - position.row
+    };
+  }
+
+  return {
+    row: colCount - 1 - position.col,
+    col: position.row
+  };
 }
 
 function didRowClear(beforeRow: Tile[], afterRow: Tile[]): boolean {

@@ -123,7 +123,12 @@ export function TileView({
         rowFlashing && !disabled ? "row-clear-flash" : ""
       ].join(" ")}
     >
-      {label}
+      <span
+        className="inline-flex transition-transform duration-[420ms] ease-[cubic-bezier(0.22,1,0.36,1)]"
+        style={{ transform: "rotate(var(--tile-upright-angle, 0deg))" }}
+      >
+        {label}
+      </span>
     </div>
   );
 }

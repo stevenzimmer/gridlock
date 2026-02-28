@@ -12,7 +12,9 @@ declare global {
 function createDb(): DB {
   const databaseUrl = process.env.DATABASE_URL?.trim();
   if (!databaseUrl) {
-    throw new Error("DATABASE_URL is required for database access.");
+    throw new Error(
+      "DATABASE_URL is required for database access. Set it in .env.local (or exported shell env) before running database-backed scripts."
+    );
   }
 
   const client = neon(databaseUrl);

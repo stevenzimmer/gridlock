@@ -7,10 +7,11 @@ import {
   enforceHorizontalVowelLimit,
   hasHorizontalVowelRun,
   normalizeSelection,
+  rotateGrid,
   selectionPatternFromPositions
 } from "@/lib/game";
 import { createSeededRng } from "@/lib/rng";
-import { type GameState, type Position, type Tile } from "@/lib/types";
+import { type GameState, type Position, type RotationDirection, type Tile } from "@/lib/types";
 import { DICTIONARY_BY_LENGTH } from "@/lib/dictionary";
 import { getDateKey } from "@/lib/server/date";
 import { getDb } from "@/lib/server/db";
@@ -221,8 +222,8 @@ async function generateBoardWithOpenAI(dateKey: string): Promise<Tile[][]> {
   assertBoardShape(parsed.board);
 
   const wildcardCount = parsed.board.flat().filter((v) => v === "*").length;
-  if (wildcardCount > 2) {
-    throw new Error("Generated board exceeded wildcard limit.");
+  if (wildcardCount < 5) {
+    throw new Error("Generated board did not meet minimum wildcard count.");
   }
 
   const grid = boardLettersToGrid(parsed.board);
@@ -684,6 +685,47 @@ export async function submitPlayerPunchout(
     state: next.state,
     completed: current.completed,
     message: next.message,
+    accepted: true
+  };
+}
+
+export async function rotatePlayerGrid(
+  playerId: string,
+  direction: RotationDirection,
+  dateKey = getDateKey()
+): Promise<{ dateKey: string; state: GameState; completed: boolean; message: string; accepted: boolean }> {
+  const db = getDb();
+  const current = await getOrCreatePlayerState(playerId, dateKey);
+
+  if (current.completed) {
+    return {
+      dateKey,
+      state: current.state,
+      completed: true,
+      message: "Daily run already completed.",
+      accepted: false
+    };
+  }
+
+  const nextState: GameState = {
+    ...current.state,
+    grid: rotateGrid(current.state.grid, direction)
+  };
+
+  await db
+    .update(playerDailyState)
+    .set({
+      stateJson: nextState,
+      completed: current.completed,
+      updatedAt: sql`now()`
+    })
+    .where(and(eq(playerDailyState.dateKey, dateKey), eq(playerDailyState.playerId, playerId)));
+
+  return {
+    dateKey,
+    state: nextState,
+    completed: current.completed,
+    message: direction === "clockwise" ? "Rotated clockwise." : "Rotated counterclockwise.",
     accepted: true
   };
 }

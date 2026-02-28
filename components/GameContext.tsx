@@ -5,9 +5,9 @@ import type { KeyboardEvent, ReactNode } from "react";
 import { GRID_COLS, GRID_ROWS, MIN_WORD_LENGTH } from "@/lib/config";
 import { dedupePositions, pruneMarkedInvalidPositions } from "@/lib/positions";
 import { getOrCreatePlayerId, isValidPlayerId, PLAYER_ID_STORAGE_KEY } from "@/lib/player-id";
-import { normalizeSelection, selectionToDisplay } from "@/lib/game";
+import { normalizeSelection, rotateGrid, rotatePosition, selectionToDisplay } from "@/lib/game";
 import { isValidUsername, normalizeUsername } from "@/lib/username";
-import type { GameState, Position, ProfilePayload, StatePayload, SubmitPayload } from "@/lib/types";
+import type { GameState, Position, ProfilePayload, RotationDirection, StatePayload, SubmitPayload } from "@/lib/types";
 
 type SettleEffect = {
   dropRows: number;
@@ -45,8 +45,13 @@ type GameContextValue = {
   settleNonce: number;
   clearingRow: number | null;
   cursor: Position;
+  rotating: boolean;
+  rotationVisualAngle: number;
+  rotationTransitioning: boolean;
   setUsernameDraft: (value: string) => void;
   submitSelection: () => Promise<void>;
+  rotateClockwise: () => Promise<void>;
+  rotateCounterclockwise: () => Promise<void>;
   updateUsername: () => Promise<void>;
   onCellPointerDown: (row: number, col: number) => void;
   onCellPointerEnter: (row: number, col: number) => void;
@@ -59,6 +64,7 @@ const GameContext = createContext<GameContextValue | null>(null);
 
 const CLEAR_ANIMATION_MS = 220;
 const SETTLE_ANIMATION_MS = 260;
+const ROTATE_ANIMATION_MS = 420;
 
 export function GameProvider({ children }: { children: ReactNode }) {
   const [playerId, setPlayerId] = useState<string>("");
@@ -76,6 +82,9 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [message, setMessage] = useState<string | null>("Loading daily board...");
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [cursor, setCursor] = useState<Position>({ row: GRID_ROWS - 1, col: 0 });
+  const [rotating, setRotating] = useState(false);
+  const [rotationVisualAngle, setRotationVisualAngle] = useState(0);
+  const [rotationTransitioning, setRotationTransitioning] = useState(false);
   const [lastWord, setLastWord] = useState<string>("");
   const [loadingState, setLoadingState] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -87,7 +96,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const anchorRef = useRef<Position | null>(null);
   const selectionRef = useRef<Position[]>([]);
 
-  const disabled = loadingState || completed || !gameState;
+  const disabled = loadingState || completed || !gameState || rotating;
 
   const loadStateForPlayer = useCallback(
     async (pid: string) => {
@@ -108,6 +117,9 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setClearingSelection([]);
       setSettlingEffects({});
       setClearingRow(null);
+      setRotationVisualAngle(0);
+      setRotationTransitioning(false);
+      setRotating(false);
       setSelection([]);
       setInvalidSelection([]);
       selectionRef.current = [];
@@ -363,6 +375,80 @@ export function GameProvider({ children }: { children: ReactNode }) {
     [disabled, gameState, playerId, submitting, userTimeZone]
   );
 
+  const runRotate = useCallback(
+    async (direction: RotationDirection) => {
+      if (!gameState || disabled || submitting || rotating) {
+        return;
+      }
+
+      const rowCount = gameState.grid.length;
+      const colCount = gameState.grid[0]?.length ?? 0;
+      const angle = direction === "clockwise" ? 90 : -90;
+
+      setRotating(true);
+      setRotationTransitioning(true);
+      setRotationVisualAngle(angle);
+      setSelection([]);
+      setInvalidSelection([]);
+      setMarkedInvalidSelection([]);
+      selectionRef.current = [];
+      anchorRef.current = null;
+      draggingRef.current = false;
+      setMessage(null);
+
+      const requestPromise = fetch("/api/game/rotate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          playerId,
+          direction,
+          timeZone: userTimeZone
+        })
+      });
+
+      await delay(ROTATE_ANIMATION_MS);
+      setGameState((previous) =>
+        previous
+          ? {
+              ...previous,
+              grid: rotateGrid(previous.grid, direction)
+            }
+          : previous
+      );
+      setCursor((previous) => rotatePosition(previous, rowCount, colCount, direction));
+      setRotationTransitioning(false);
+      setRotationVisualAngle(0);
+
+      try {
+        const response = await requestPromise;
+        const payload = (await response.json()) as SubmitPayload | { error: string };
+        if (!response.ok || "error" in payload) {
+          throw new Error((payload as { error: string }).error || "Rotate failed");
+        }
+        setDateKey(payload.dateKey);
+        setGameState(payload.state);
+        setCompleted(payload.completed);
+        setMessage(payload.message);
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "Failed to rotate board.");
+        try {
+          await loadStateForPlayer(playerId);
+        } catch (reloadError) {
+          setErrorMessage(
+            reloadError instanceof Error
+              ? reloadError.message
+              : "Failed to reload board after rotate error."
+          );
+        }
+      } finally {
+        setRotating(false);
+      }
+    },
+    [disabled, gameState, loadStateForPlayer, playerId, rotating, submitting, userTimeZone]
+  );
+
   const onCellPointerDown = useCallback(
     (row: number, col: number) => {
       if (!gameState || disabled) {
@@ -519,7 +605,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     dateKey,
     completed,
     lastWord,
-    loading: loadingState || submitting,
+    loading: loadingState || submitting || rotating,
     disabled: disabled || Boolean(gameState?.gameOver),
     gameOver: Boolean(gameState?.gameOver),
     selectedDisplay,
@@ -536,8 +622,13 @@ export function GameProvider({ children }: { children: ReactNode }) {
     settleNonce,
     clearingRow,
     cursor,
+    rotating,
+    rotationVisualAngle,
+    rotationTransitioning,
     setUsernameDraft,
     submitSelection: runSubmit,
+    rotateClockwise: () => runRotate("clockwise"),
+    rotateCounterclockwise: () => runRotate("counterclockwise"),
     updateUsername,
     onCellPointerDown,
     onCellPointerEnter,
