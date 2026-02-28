@@ -1,5 +1,5 @@
 import type { Tile } from "@/lib/types";
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 
 type SettleEffect = {
   dropRows: number;
@@ -19,7 +19,7 @@ type TileViewProps = {
   cursor: boolean;
 };
 
-export function TileView({
+function TileViewComponent({
   tile,
   disabled,
   selected,
@@ -132,3 +132,33 @@ export function TileView({
     </div>
   );
 }
+
+function areTilesEqual(previous: Tile, next: Tile): boolean {
+  if (previous.kind !== next.kind) {
+    return false;
+  }
+
+  if (previous.kind === "letter" && next.kind === "letter") {
+    return previous.letter === next.letter && previous.isWildcard === next.isWildcard;
+  }
+
+  return true;
+}
+
+function propsAreEqual(previous: TileViewProps, next: TileViewProps): boolean {
+  return (
+    areTilesEqual(previous.tile, next.tile) &&
+    previous.disabled === next.disabled &&
+    previous.selected === next.selected &&
+    previous.invalid === next.invalid &&
+    previous.markedInvalid === next.markedInvalid &&
+    previous.clearing === next.clearing &&
+    previous.settleNonce === next.settleNonce &&
+    previous.rowFlashing === next.rowFlashing &&
+    previous.cursor === next.cursor &&
+    previous.settleEffect?.dropRows === next.settleEffect?.dropRows &&
+    previous.settleEffect?.spawned === next.settleEffect?.spawned
+  );
+}
+
+export const TileView = memo(TileViewComponent, propsAreEqual);

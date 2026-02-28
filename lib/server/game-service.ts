@@ -12,7 +12,7 @@ import {
 } from "@/lib/game";
 import { createSeededRng } from "@/lib/rng";
 import { type GameState, type Position, type RotationDirection, type Tile } from "@/lib/types";
-import { DICTIONARY_BY_LENGTH } from "@/lib/dictionary";
+import { DICTIONARY_BY_LENGTH, resolveDictionaryPattern } from "@/lib/dictionary";
 import { getDateKey } from "@/lib/server/date";
 import { getDb } from "@/lib/server/db";
 import { getOpenAIClient, getOpenAIModel } from "@/lib/server/openai";
@@ -272,21 +272,6 @@ function patternMatchesWord(pattern: string, word: string): boolean {
     }
   }
   return true;
-}
-
-function resolvePatternWithDictionary(pattern: string): string | null {
-  const upperPattern = pattern.toUpperCase();
-  const candidates = DICTIONARY_BY_LENGTH.get(upperPattern.length);
-  if (!candidates) {
-    return null;
-  }
-
-  for (const candidate of candidates) {
-    if (patternMatchesWord(upperPattern, candidate)) {
-      return candidate;
-    }
-  }
-  return null;
 }
 
 function parseJsonValue<T>(value: unknown, fallback: T): T {
@@ -582,7 +567,7 @@ export async function submitPlayerSelection(
   }
 
   const pattern = selectionPatternFromPositions(current.state, normalized.positions);
-  const resolved = resolvePatternWithDictionary(pattern);
+  const resolved = resolveDictionaryPattern(pattern);
   if (!resolved) {
     const nextInvalidWordsSubmitted = Math.min(
       MAX_INVALID_SUBMISSIONS,

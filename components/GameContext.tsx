@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 import { GRID_COLS, GRID_ROWS, MIN_WORD_LENGTH } from "@/lib/config";
 import { dedupePositions, pruneMarkedInvalidPositions } from "@/lib/positions";
@@ -13,6 +13,67 @@ type SettleEffect = {
   dropRows: number;
   spawned: boolean;
 };
+
+type UiState = {
+  selection: Position[];
+  invalidSelection: Position[];
+  markedInvalidSelection: Position[];
+  clearingSelection: Position[];
+  settlingEffects: Record<string, SettleEffect>;
+  settleNonce: number;
+  clearingRow: number | null;
+  message: string | null;
+  errorMessage: string;
+  cursor: Position;
+  rotating: boolean;
+  rotationVisualAngle: number;
+  rotationTransitioning: boolean;
+  lastWord: string;
+};
+
+type UiAction =
+  | { type: "patch"; patch: Partial<UiState> }
+  | { type: "setSettlingEffects"; effects: Record<string, SettleEffect> }
+  | { type: "clearSettlingEffects" };
+
+const initialUiState: UiState = {
+  selection: [],
+  invalidSelection: [],
+  markedInvalidSelection: [],
+  clearingSelection: [],
+  settlingEffects: {},
+  settleNonce: 0,
+  clearingRow: null,
+  message: "Loading daily board...",
+  errorMessage: "",
+  cursor: { row: GRID_ROWS - 1, col: 0 },
+  rotating: false,
+  rotationVisualAngle: 0,
+  rotationTransitioning: false,
+  lastWord: ""
+};
+
+function uiReducer(state: UiState, action: UiAction): UiState {
+  if (action.type === "patch") {
+    return {
+      ...state,
+      ...action.patch
+    };
+  }
+
+  if (action.type === "setSettlingEffects") {
+    return {
+      ...state,
+      settlingEffects: action.effects,
+      settleNonce: state.settleNonce + 1
+    };
+  }
+
+  return {
+    ...state,
+    settlingEffects: {}
+  };
+}
 
 type GameContextValue = {
   playerId: string;
@@ -72,20 +133,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [usernameDraft, setUsernameDraft] = useState<string>("");
   const [dateKey, setDateKey] = useState<string>("");
   const [gameState, setGameState] = useState<GameState | null>(null);
-  const [selection, setSelection] = useState<Position[]>([]);
-  const [invalidSelection, setInvalidSelection] = useState<Position[]>([]);
-  const [markedInvalidSelection, setMarkedInvalidSelection] = useState<Position[]>([]);
-  const [clearingSelection, setClearingSelection] = useState<Position[]>([]);
-  const [settlingEffects, setSettlingEffects] = useState<Record<string, SettleEffect>>({});
-  const [settleNonce, setSettleNonce] = useState(0);
-  const [clearingRow, setClearingRow] = useState<number | null>(null);
-  const [message, setMessage] = useState<string | null>("Loading daily board...");
-  const [errorMessage, setErrorMessage] = useState<string>("");
-  const [cursor, setCursor] = useState<Position>({ row: GRID_ROWS - 1, col: 0 });
-  const [rotating, setRotating] = useState(false);
-  const [rotationVisualAngle, setRotationVisualAngle] = useState(0);
-  const [rotationTransitioning, setRotationTransitioning] = useState(false);
-  const [lastWord, setLastWord] = useState<string>("");
+  const [uiState, dispatchUi] = useReducer(uiReducer, initialUiState);
   const [loadingState, setLoadingState] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [savingUsername, setSavingUsername] = useState(false);
@@ -96,7 +144,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const anchorRef = useRef<Position | null>(null);
   const selectionRef = useRef<Position[]>([]);
 
-  const disabled = loadingState || completed || !gameState || rotating;
+  const disabled = loadingState || completed || !gameState || uiState.rotating;
 
   const loadStateForPlayer = useCallback(
     async (pid: string) => {
@@ -113,18 +161,23 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setCompleted(payload.completed);
       setUsername(payload.username ?? null);
       setUsernameDraft(payload.username ?? "");
-      setMarkedInvalidSelection([]);
-      setClearingSelection([]);
-      setSettlingEffects({});
-      setClearingRow(null);
-      setRotationVisualAngle(0);
-      setRotationTransitioning(false);
-      setRotating(false);
-      setSelection([]);
-      setInvalidSelection([]);
+      dispatchUi({
+        type: "patch",
+        patch: {
+          markedInvalidSelection: [],
+          clearingSelection: [],
+          clearingRow: null,
+          rotationVisualAngle: 0,
+          rotationTransitioning: false,
+          rotating: false,
+          selection: [],
+          invalidSelection: [],
+          message: payload.completed ? "Daily run completed." : null
+        }
+      });
+      dispatchUi({ type: "clearSettlingEffects" });
       selectionRef.current = [];
       anchorRef.current = null;
-      setMessage(payload.completed ? "Daily run completed." : null);
     },
     [userTimeZone]
   );
@@ -152,7 +205,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
         if (!active) {
           return;
         }
-        setMessage(error instanceof Error ? error.message : "Failed to load daily board.");
+        dispatchUi({
+          type: "patch",
+          patch: { message: error instanceof Error ? error.message : "Failed to load daily board." }
+        });
       } finally {
         if (active) {
           setLoadingState(false);
@@ -170,7 +226,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const updateUsername = useCallback(async () => {
     const normalized = normalizeUsername(usernameDraft);
     if (normalized.length > 0 && !isValidUsername(normalized)) {
-      setMessage("Use 3-40 chars: letters, numbers, '.', '_' or '-'.");
+      dispatchUi({
+        type: "patch",
+        patch: { message: "Use 3-40 chars: letters, numbers, '.', '_' or '-'." }
+      });
       return;
     }
 
@@ -179,7 +238,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     }
 
     setSavingUsername(true);
-    setErrorMessage("");
+    dispatchUi({ type: "patch", patch: { errorMessage: "" } });
     try {
       const response = await fetch("/api/player/profile", {
         method: "POST",
@@ -199,9 +258,17 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
       setUsername(payload.username);
       setUsernameDraft(payload.username ?? "");
-      setMessage(payload.username ? `Username updated: ${payload.username}` : "Username cleared.");
+      dispatchUi({
+        type: "patch",
+        patch: {
+          message: payload.username ? `Username updated: ${payload.username}` : "Username cleared."
+        }
+      });
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Failed to update username.");
+      dispatchUi({
+        type: "patch",
+        patch: { errorMessage: error instanceof Error ? error.message : "Failed to update username." }
+      });
     } finally {
       setSavingUsername(false);
     }
@@ -211,15 +278,18 @@ export function GameProvider({ children }: { children: ReactNode }) {
     if (!gameState) {
       return "";
     }
-    return selectionToDisplay(gameState.grid, selection);
-  }, [gameState, selection]);
+    return selectionToDisplay(gameState.grid, uiState.selection);
+  }, [gameState, uiState.selection]);
 
   const canSubmitSelection = useMemo(() => {
     if (!gameState) {
       return false;
     }
-    return normalizeSelection(gameState.grid, selection).valid && selection.length >= MIN_WORD_LENGTH;
-  }, [gameState, selection]);
+    return (
+      normalizeSelection(gameState.grid, uiState.selection).valid &&
+      uiState.selection.length >= MIN_WORD_LENGTH
+    );
+  }, [gameState, uiState.selection]);
 
   const runSubmit = useCallback(async () => {
     if (!gameState || disabled || submitting) {
@@ -264,52 +334,76 @@ export function GameProvider({ children }: { children: ReactNode }) {
           activeSelection.length === gridBeforeSubmit[row].length;
 
         if (activeSelection.length > 0) {
-          setClearingSelection(activeSelection);
-          setClearingRow(rowCanFlash ? row : null);
+          dispatchUi({
+            type: "patch",
+            patch: {
+              clearingSelection: activeSelection,
+              clearingRow: rowCanFlash ? row : null
+            }
+          });
           await delay(CLEAR_ANIMATION_MS);
         }
 
-        setClearingSelection([]);
-        setClearingRow(null);
+        const matchedWord = /^Cleared\s+([A-Z]+)/.exec(payload.message || "");
+        const nextMarkedInvalidSelection = pruneMarkedInvalidPositions(
+          uiState.markedInvalidSelection,
+          gridBeforeSubmit,
+          activeSelection,
+          payload.state.grid
+        );
+        const settleEffects = getSettleEffects(gridBeforeSubmit, payload.state.grid, activeSelection);
+
         setGameState(payload.state);
         setCompleted(payload.completed);
-        setMessage(payload.message);
-        setInvalidSelection([]);
-        setMarkedInvalidSelection((previousMarked) =>
-          pruneMarkedInvalidPositions(previousMarked, gridBeforeSubmit, activeSelection, payload.state.grid)
-        );
-        const matchedWord = /^Cleared\s+([A-Z]+)/.exec(payload.message || "");
-        if (matchedWord?.[1]) {
-          setLastWord(matchedWord[1]);
-        }
-        setSettlingEffects(getSettleEffects(gridBeforeSubmit, payload.state.grid, activeSelection));
-        setSettleNonce((value) => value + 1);
+        dispatchUi({
+          type: "patch",
+          patch: {
+            clearingSelection: [],
+            clearingRow: null,
+            message: payload.message,
+            invalidSelection: [],
+            markedInvalidSelection: nextMarkedInvalidSelection,
+            selection: [],
+            lastWord: matchedWord?.[1] ?? uiState.lastWord
+          }
+        });
+        dispatchUi({
+          type: "setSettlingEffects",
+          effects: settleEffects
+        });
         shouldRunSettleAnimation = true;
         selectionRef.current = [];
-        setSelection([]);
         anchorRef.current = null;
       } else {
+        const nextMarkedInvalidSelection = dedupePositions([
+          ...uiState.markedInvalidSelection,
+          ...activeSelection
+        ]);
         setGameState(payload.state);
         setCompleted(payload.completed);
-        if (!payload.accepted && payload.message.startsWith("Invalid word.")) {
-          setMessage(null);
-        } else {
-          setMessage(payload.message);
-        }
-        setInvalidSelection(activeSelection);
-        setMarkedInvalidSelection((previousMarked) => dedupePositions([...previousMarked, ...activeSelection]));
+        dispatchUi({
+          type: "patch",
+          patch: {
+            message: !payload.accepted && payload.message.startsWith("Invalid word.") ? null : payload.message,
+            invalidSelection: activeSelection,
+            markedInvalidSelection: nextMarkedInvalidSelection
+          }
+        });
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to submit selection.");
+      dispatchUi({
+        type: "patch",
+        patch: { message: error instanceof Error ? error.message : "Failed to submit selection." }
+      });
     } finally {
       setSubmitting(false);
       if (shouldRunSettleAnimation) {
         window.setTimeout(() => {
-          setSettlingEffects({});
+          dispatchUi({ type: "clearSettlingEffects" });
         }, SETTLE_ANIMATION_MS);
       }
     }
-  }, [disabled, gameState, playerId, submitting, userTimeZone]);
+  }, [disabled, gameState, playerId, submitting, uiState.lastWord, uiState.markedInvalidSelection, userTimeZone]);
 
   const runPunchout = useCallback(
     async (row: number, col: number) => {
@@ -340,44 +434,67 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
         setDateKey(payload.dateKey);
         if (payload.accepted) {
-          setClearingSelection([{ row, col }]);
+          dispatchUi({
+            type: "patch",
+            patch: {
+              clearingSelection: [{ row, col }]
+            }
+          });
           await delay(CLEAR_ANIMATION_MS);
-          setClearingSelection([]);
+          dispatchUi({
+            type: "patch",
+            patch: {
+              clearingSelection: []
+            }
+          });
         }
         setGameState(payload.state);
         setCompleted(payload.completed);
-        setMessage(payload.message);
         if (payload.accepted) {
-          setSettlingEffects(getSettleEffects(gridBeforePunchout, payload.state.grid, [{ row, col }]));
-          setSettleNonce((value) => value + 1);
+          dispatchUi({
+            type: "setSettlingEffects",
+            effects: getSettleEffects(gridBeforePunchout, payload.state.grid, [{ row, col }])
+          });
           shouldRunSettleAnimation = true;
         }
-        setSelection([]);
-        setInvalidSelection([]);
-        setMarkedInvalidSelection((previousMarked) =>
-          pruneMarkedInvalidPositions(previousMarked, gridBeforePunchout, [{ row, col }], payload.state.grid)
-        );
+        dispatchUi({
+          type: "patch",
+          patch: {
+            message: payload.message,
+            selection: [],
+            invalidSelection: [],
+            markedInvalidSelection: pruneMarkedInvalidPositions(
+              uiState.markedInvalidSelection,
+              gridBeforePunchout,
+              [{ row, col }],
+              payload.state.grid
+            ),
+            cursor: { row, col }
+          }
+        });
         selectionRef.current = [];
         anchorRef.current = null;
         draggingRef.current = false;
-        setCursor({ row, col });
       } catch (error) {
-        setMessage(error instanceof Error ? error.message : "Failed to use punchout.");
+        dispatchUi({
+          type: "patch",
+          patch: { message: error instanceof Error ? error.message : "Failed to use punchout." }
+        });
       } finally {
         setSubmitting(false);
         if (shouldRunSettleAnimation) {
           window.setTimeout(() => {
-            setSettlingEffects({});
+            dispatchUi({ type: "clearSettlingEffects" });
           }, SETTLE_ANIMATION_MS);
         }
       }
     },
-    [disabled, gameState, playerId, submitting, userTimeZone]
+    [disabled, gameState, playerId, submitting, uiState.markedInvalidSelection, userTimeZone]
   );
 
   const runRotate = useCallback(
     async (direction: RotationDirection) => {
-      if (!gameState || disabled || submitting || rotating) {
+      if (!gameState || disabled || submitting || uiState.rotating) {
         return;
       }
 
@@ -385,16 +502,21 @@ export function GameProvider({ children }: { children: ReactNode }) {
       const colCount = gameState.grid[0]?.length ?? 0;
       const angle = direction === "clockwise" ? 90 : -90;
 
-      setRotating(true);
-      setRotationTransitioning(true);
-      setRotationVisualAngle(angle);
-      setSelection([]);
-      setInvalidSelection([]);
-      setMarkedInvalidSelection([]);
+      dispatchUi({
+        type: "patch",
+        patch: {
+          rotating: true,
+          rotationTransitioning: true,
+          rotationVisualAngle: angle,
+          selection: [],
+          invalidSelection: [],
+          markedInvalidSelection: [],
+          message: null
+        }
+      });
       selectionRef.current = [];
       anchorRef.current = null;
       draggingRef.current = false;
-      setMessage(null);
 
       const requestPromise = fetch("/api/game/rotate", {
         method: "POST",
@@ -417,9 +539,14 @@ export function GameProvider({ children }: { children: ReactNode }) {
             }
           : previous
       );
-      setCursor((previous) => rotatePosition(previous, rowCount, colCount, direction));
-      setRotationTransitioning(false);
-      setRotationVisualAngle(0);
+      dispatchUi({
+        type: "patch",
+        patch: {
+          cursor: rotatePosition(uiState.cursor, rowCount, colCount, direction),
+          rotationTransitioning: false,
+          rotationVisualAngle: 0
+        }
+      });
 
       try {
         const response = await requestPromise;
@@ -430,23 +557,36 @@ export function GameProvider({ children }: { children: ReactNode }) {
         setDateKey(payload.dateKey);
         setGameState(payload.state);
         setCompleted(payload.completed);
-        setMessage(payload.message);
+        dispatchUi({
+          type: "patch",
+          patch: { message: payload.message }
+        });
       } catch (error) {
-        setMessage(error instanceof Error ? error.message : "Failed to rotate board.");
+        dispatchUi({
+          type: "patch",
+          patch: { message: error instanceof Error ? error.message : "Failed to rotate board." }
+        });
         try {
           await loadStateForPlayer(playerId);
         } catch (reloadError) {
-          setErrorMessage(
-            reloadError instanceof Error
-              ? reloadError.message
-              : "Failed to reload board after rotate error."
-          );
+          dispatchUi({
+            type: "patch",
+            patch: {
+              errorMessage:
+                reloadError instanceof Error
+                  ? reloadError.message
+                  : "Failed to reload board after rotate error."
+            }
+          });
         }
       } finally {
-        setRotating(false);
+        dispatchUi({
+          type: "patch",
+          patch: { rotating: false }
+        });
       }
     },
-    [disabled, gameState, loadStateForPlayer, playerId, rotating, submitting, userTimeZone]
+    [disabled, gameState, loadStateForPlayer, playerId, submitting, uiState.cursor, uiState.rotating, userTimeZone]
   );
 
   const onCellPointerDown = useCallback(
@@ -457,8 +597,13 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
       const tile = gameState.grid[row][col];
       if (tile.kind !== "letter") {
-        setSelection([]);
-        setInvalidSelection([]);
+        dispatchUi({
+          type: "patch",
+          patch: {
+            selection: [],
+            invalidSelection: []
+          }
+        });
         selectionRef.current = [];
         anchorRef.current = null;
         return;
@@ -466,11 +611,16 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
       draggingRef.current = true;
       anchorRef.current = { row, col };
-      setSelection([{ row, col }]);
-      setInvalidSelection([]);
+      dispatchUi({
+        type: "patch",
+        patch: {
+          selection: [{ row, col }],
+          invalidSelection: [],
+          cursor: { row, col },
+          message: null
+        }
+      });
       selectionRef.current = [{ row, col }];
-      setCursor({ row, col });
-      setMessage(null);
     },
     [disabled, gameState]
   );
@@ -498,10 +648,15 @@ export function GameProvider({ children }: { children: ReactNode }) {
         nextRange.push({ row, col: c });
       }
 
-      setSelection(nextRange);
-      setInvalidSelection([]);
+      dispatchUi({
+        type: "patch",
+        patch: {
+          selection: nextRange,
+          invalidSelection: [],
+          cursor: { row, col }
+        }
+      });
       selectionRef.current = nextRange;
-      setCursor({ row, col });
     },
     [disabled, gameState]
   );
@@ -525,61 +680,96 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
       if (event.key === "ArrowLeft") {
         event.preventDefault();
-        setCursor((pos) => ({ ...pos, col: Math.max(0, pos.col - 1) }));
+        dispatchUi({
+          type: "patch",
+          patch: {
+            cursor: { ...uiState.cursor, col: Math.max(0, uiState.cursor.col - 1) }
+          }
+        });
         return;
       }
       if (event.key === "ArrowRight") {
         event.preventDefault();
-        setCursor((pos) => ({ ...pos, col: Math.min(GRID_COLS - 1, pos.col + 1) }));
+        dispatchUi({
+          type: "patch",
+          patch: {
+            cursor: { ...uiState.cursor, col: Math.min(GRID_COLS - 1, uiState.cursor.col + 1) }
+          }
+        });
         return;
       }
       if (event.key === "ArrowUp") {
         event.preventDefault();
-        setCursor((pos) => ({ ...pos, row: Math.max(0, pos.row - 1) }));
+        dispatchUi({
+          type: "patch",
+          patch: {
+            cursor: { ...uiState.cursor, row: Math.max(0, uiState.cursor.row - 1) }
+          }
+        });
         return;
       }
       if (event.key === "ArrowDown") {
         event.preventDefault();
-        setCursor((pos) => ({ ...pos, row: Math.min(GRID_ROWS - 1, pos.row + 1) }));
+        dispatchUi({
+          type: "patch",
+          patch: {
+            cursor: { ...uiState.cursor, row: Math.min(GRID_ROWS - 1, uiState.cursor.row + 1) }
+          }
+        });
         return;
       }
       if (event.key === "Escape") {
         event.preventDefault();
-        setSelection([]);
-        setInvalidSelection([]);
+        dispatchUi({
+          type: "patch",
+          patch: {
+            selection: [],
+            invalidSelection: []
+          }
+        });
         selectionRef.current = [];
         anchorRef.current = null;
         return;
       }
       if (event.key === " ") {
         event.preventDefault();
-        const tile = gameState.grid[cursor.row][cursor.col];
+        const tile = gameState.grid[uiState.cursor.row][uiState.cursor.col];
         if (tile.kind !== "letter") {
           return;
         }
 
-        if (!anchorRef.current || anchorRef.current.row !== cursor.row) {
-          anchorRef.current = { ...cursor };
-          setSelection([{ ...cursor }]);
-          setInvalidSelection([]);
-          selectionRef.current = [{ ...cursor }];
+        if (!anchorRef.current || anchorRef.current.row !== uiState.cursor.row) {
+          anchorRef.current = { ...uiState.cursor };
+          dispatchUi({
+            type: "patch",
+            patch: {
+              selection: [{ ...uiState.cursor }],
+              invalidSelection: []
+            }
+          });
+          selectionRef.current = [{ ...uiState.cursor }];
           return;
         }
 
-        const rangeStart = Math.min(anchorRef.current.col, cursor.col);
-        const rangeEnd = Math.max(anchorRef.current.col, cursor.col);
+        const rangeStart = Math.min(anchorRef.current.col, uiState.cursor.col);
+        const rangeEnd = Math.max(anchorRef.current.col, uiState.cursor.col);
         const nextRange: Position[] = [];
 
         for (let col = rangeStart; col <= rangeEnd; col++) {
-          const nextTile = gameState.grid[cursor.row][col];
+          const nextTile = gameState.grid[uiState.cursor.row][col];
           if (nextTile.kind !== "letter") {
             return;
           }
-          nextRange.push({ row: cursor.row, col });
+          nextRange.push({ row: uiState.cursor.row, col });
         }
 
-        setSelection(nextRange);
-        setInvalidSelection([]);
+        dispatchUi({
+          type: "patch",
+          patch: {
+            selection: nextRange,
+            invalidSelection: []
+          }
+        });
         selectionRef.current = nextRange;
         return;
       }
@@ -588,7 +778,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
         void runSubmit();
       }
     },
-    [cursor, disabled, gameState, runSubmit]
+    [disabled, gameState, runSubmit, uiState.cursor]
   );
 
   const value: GameContextValue = {
@@ -604,27 +794,27 @@ export function GameProvider({ children }: { children: ReactNode }) {
     invalidWordsSubmitted: gameState?.invalidWordsSubmitted ?? 0,
     dateKey,
     completed,
-    lastWord,
-    loading: loadingState || submitting || rotating,
+    lastWord: uiState.lastWord,
+    loading: loadingState || submitting || uiState.rotating,
     disabled: disabled || Boolean(gameState?.gameOver),
     gameOver: Boolean(gameState?.gameOver),
     selectedDisplay,
     canSubmitSelection,
-    message,
-    errorMessage,
+    message: uiState.message,
+    errorMessage: uiState.errorMessage,
     savingUsername,
     grid: gameState?.grid ?? null,
-    selection,
-    invalidSelection,
-    markedInvalidSelection,
-    clearingSelection,
-    settlingEffects,
-    settleNonce,
-    clearingRow,
-    cursor,
-    rotating,
-    rotationVisualAngle,
-    rotationTransitioning,
+    selection: uiState.selection,
+    invalidSelection: uiState.invalidSelection,
+    markedInvalidSelection: uiState.markedInvalidSelection,
+    clearingSelection: uiState.clearingSelection,
+    settlingEffects: uiState.settlingEffects,
+    settleNonce: uiState.settleNonce,
+    clearingRow: uiState.clearingRow,
+    cursor: uiState.cursor,
+    rotating: uiState.rotating,
+    rotationVisualAngle: uiState.rotationVisualAngle,
+    rotationTransitioning: uiState.rotationTransitioning,
     setUsernameDraft,
     submitSelection: runSubmit,
     rotateClockwise: () => runRotate("clockwise"),
