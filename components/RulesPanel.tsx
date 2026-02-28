@@ -44,6 +44,12 @@ export function RulesPanel() {
                         You cannot select stones. If the path crosses a stone,
                         that selection is blocked.
                     </p>
+                    <p>
+                        Use the rotate buttons below the board (↺ and ↻) to
+                        rotate the entire grid 90° counterclockwise or
+                        clockwise. This can reveal new horizontal word lanes
+                        when you get stuck.
+                    </p>
                 </section>
 
                 <section className="space-y-2 py-3 text-sm text-slate-200">

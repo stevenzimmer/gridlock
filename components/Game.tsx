@@ -7,6 +7,7 @@ import {GameProvider, useGameContext} from "@/components/GameContext";
 import {StatWrapper} from "./StatWrapper";
 import {Punchouts} from "./Punchouts";
 import {SubmissionsRemaining} from "./SubmissionsRemaining";
+import {RulesChip} from "./RulesChip";
 
 function GameContent() {
     const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
@@ -23,18 +24,23 @@ function GameContent() {
                         Daily board: {dateKey || "-"}
                     </p>
                 </div>
-                <button
-                    type="button"
-                    onClick={() => setMobileDrawerOpen(true)}
-                    className="inline-flex items-center gap-2 rounded-md border border-slate-600 bg-slate-900/70 px-3 py-2 text-sm font-semibold text-slate-100"
-                    aria-label="Open game panel"
-                >
-                    <span className="inline-flex flex-col gap-1">
-                        <span className="h-0.5 w-4 bg-slate-100" />
-                        <span className="h-0.5 w-4 bg-slate-100" />
-                        <span className="h-0.5 w-4 bg-slate-100" />
-                    </span>
-                </button>
+                <div className="flex justify-end items-center">
+                    <div className="px-3">
+                        <RulesChip />
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setMobileDrawerOpen(true)}
+                        className="inline-flex items-center gap-2 rounded-md border border-slate-600 bg-slate-900/70 px-3 py-2 text-sm font-semibold text-slate-100"
+                        aria-label="Open game panel"
+                    >
+                        <span className="inline-flex flex-col gap-1">
+                            <span className="h-0.5 w-4 bg-slate-100" />
+                            <span className="h-0.5 w-4 bg-slate-100" />
+                            <span className="h-0.5 w-4 bg-slate-100" />
+                        </span>
+                    </button>
+                </div>
             </div>
 
             {mobileDrawerOpen ? (
