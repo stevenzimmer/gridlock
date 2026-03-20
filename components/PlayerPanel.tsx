@@ -1,4 +1,3 @@
-import {RulesChip} from "./RulesChip";
 import {PlayerId} from "./PlayerId";
 import {useGameContext} from "./GameContext";
 export function PlayerPanel() {

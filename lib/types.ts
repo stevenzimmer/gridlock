@@ -33,11 +33,33 @@ export type GameState = {
     };
 };
 
+export type BoardPatternResolution = {
+    word: string;
+    wildcardCount: number;
+    score: number;
+};
+
+export type BoardQualityMetrics = {
+    totalWords: number;
+    shortWords: number;
+    mediumWords: number;
+    longWords: number;
+    topWords: string[];
+};
+
+export type BoardValidation = {
+    version: 2;
+    validWords: string[];
+    patterns: Record<string, BoardPatternResolution>;
+    quality: BoardQualityMetrics;
+};
+
 export type StatePayload = {
     dateKey: string;
     state: GameState;
     completed: boolean;
     username?: string | null;
+    boardValidation: BoardValidation;
 };
 
 export type SubmitPayload = StatePayload & {

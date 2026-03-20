@@ -9,6 +9,7 @@ type SettleEffect = {
 type TileViewProps = {
   tile: Tile;
   disabled: boolean;
+  effectsReduced: boolean;
   selected: boolean;
   invalid: boolean;
   markedInvalid: boolean;
@@ -22,6 +23,7 @@ type TileViewProps = {
 function TileViewComponent({
   tile,
   disabled,
+  effectsReduced,
   selected,
   invalid,
   markedInvalid,
@@ -34,7 +36,7 @@ function TileViewComponent({
   const tileRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!clearing || !tileRef.current) {
+    if (effectsReduced || !clearing || !tileRef.current) {
       return;
     }
 
@@ -54,10 +56,10 @@ function TileViewComponent({
     return () => {
       animation.cancel();
     };
-  }, [clearing]);
+  }, [clearing, effectsReduced]);
 
   useEffect(() => {
-    if (!settleEffect || !tileRef.current || clearing) {
+    if (effectsReduced || !settleEffect || !tileRef.current || clearing) {
       return;
     }
 
@@ -88,7 +90,31 @@ function TileViewComponent({
     return () => {
       animation.cancel();
     };
-  }, [clearing, settleEffect, settleNonce]);
+  }, [clearing, effectsReduced, settleEffect, settleNonce]);
+
+  useEffect(() => {
+    if (effectsReduced || !invalid || !tileRef.current || clearing) {
+      return;
+    }
+
+    const animation = tileRef.current.animate(
+      [
+        { transform: "translateX(0)" },
+        { transform: "translateX(-7%)" },
+        { transform: "translateX(6%)" },
+        { transform: "translateX(-5%)" },
+        { transform: "translateX(0)" }
+      ],
+      {
+        duration: 190,
+        easing: "ease-out"
+      }
+    );
+
+    return () => {
+      animation.cancel();
+    };
+  }, [effectsReduced, invalid, clearing]);
 
   let label = "";
   let tone = "bg-white border-slate-700";
@@ -117,7 +143,9 @@ function TileViewComponent({
             : markedInvalid
               ? "bg-red-200/60 border-red-300 text-zinc-900"
               : tone,
-        selected && !invalid && !disabled ? "scale-[1.06] ring-2 ring-amber-300" : "",
+        selected && !invalid && !disabled
+          ? `scale-[1.06] ring-2 ring-amber-300 ${effectsReduced ? "" : "selection-charge"}`
+          : "",
         invalid && !disabled ? "ring-2 ring-red-200" : "",
         cursor && !disabled ? "ring-2 ring-emerald-300" : "",
         rowFlashing && !disabled ? "row-clear-flash" : ""
@@ -149,6 +177,7 @@ function propsAreEqual(previous: TileViewProps, next: TileViewProps): boolean {
   return (
     areTilesEqual(previous.tile, next.tile) &&
     previous.disabled === next.disabled &&
+    previous.effectsReduced === next.effectsReduced &&
     previous.selected === next.selected &&
     previous.invalid === next.invalid &&
     previous.markedInvalid === next.markedInvalid &&
