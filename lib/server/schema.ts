@@ -8,12 +8,12 @@ import {
   timestamp,
   uniqueIndex
 } from "drizzle-orm/pg-core";
-import type { GameState, Tile } from "@/lib/types";
+import type { BoardValidation, GameState, Tile } from "@/lib/types";
 
 export const dailyBoards = pgTable("daily_boards", {
   dateKey: text("date_key").primaryKey(),
   gridJson: jsonb("grid_json").$type<Tile[][]>().notNull(),
-  validWordsJson: jsonb("valid_words_json").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+  validWordsJson: jsonb("valid_words_json").$type<BoardValidation>().notNull().default(sql`'{}'::jsonb`),
   model: text("model").notNull(),
   promptVersion: text("prompt_version").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow()

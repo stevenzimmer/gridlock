@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { config as loadEnv } from "dotenv";
+import { buildBoardValidation } from "@/lib/board-validation";
 import { getDb } from "@/lib/server/db";
 import { dailyBoards, playerDailyState, playerProfiles } from "@/lib/server/schema";
 import type { GameState, Tile } from "@/lib/types";
@@ -71,12 +72,8 @@ async function migrateDailyBoards(sqlite: Database.Database): Promise<number> {
       row.date_key,
       "grid_json"
     );
-    const validWords = parseJsonOrThrow<string[]>(
-      row.valid_words_json ?? "[]",
-      "daily_boards",
-      row.date_key,
-      "valid_words_json"
-    );
+    parseJsonOrThrow<unknown>(row.valid_words_json ?? "[]", "daily_boards", row.date_key, "valid_words_json");
+    const validWords = buildBoardValidation(grid);
 
     await db
       .insert(dailyBoards)

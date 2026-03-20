@@ -5,13 +5,37 @@ import type { KeyboardEvent, ReactNode } from "react";
 import { GRID_COLS, GRID_ROWS, MIN_WORD_LENGTH } from "@/lib/config";
 import { dedupePositions, pruneMarkedInvalidPositions } from "@/lib/positions";
 import { getOrCreatePlayerId, isValidPlayerId, PLAYER_ID_STORAGE_KEY } from "@/lib/player-id";
-import { normalizeSelection, rotateGrid, rotatePosition, selectionToDisplay } from "@/lib/game";
+import { normalizeSelection, rotateGrid, rotatePosition, scoreWord, selectionToDisplay } from "@/lib/game";
 import { isValidUsername, normalizeUsername } from "@/lib/username";
-import type { GameState, Position, ProfilePayload, RotationDirection, StatePayload, SubmitPayload } from "@/lib/types";
+import type {
+  BoardValidation,
+  GameState,
+  Position,
+  ProfilePayload,
+  RotationDirection,
+  StatePayload,
+  SubmitPayload
+} from "@/lib/types";
 
 type SettleEffect = {
   dropRows: number;
   spawned: boolean;
+};
+
+type FloatingReward = {
+  id: number;
+  text: string;
+  row: number;
+  startCol: number;
+  endCol: number;
+  kind: "word" | "rowClear";
+};
+
+type SelectionPreview = {
+  status: "idle" | "tooShort" | "invalid" | "valid";
+  resolvedWord: string | null;
+  score: number | null;
+  rowClear: boolean;
 };
 
 type UiState = {
@@ -94,6 +118,7 @@ type GameContextValue = {
   gameOver: boolean;
   selectedDisplay: string;
   canSubmitSelection: boolean;
+  selectionPreview: SelectionPreview;
   message: string | null;
   errorMessage: string;
   savingUsername: boolean;
@@ -109,6 +134,13 @@ type GameContextValue = {
   rotating: boolean;
   rotationVisualAngle: number;
   rotationTransitioning: boolean;
+  effectsReduced: boolean;
+  successImpactNonce: number;
+  invalidImpactNonce: number;
+  scorePulseNonce: number;
+  rowSweepNonce: number;
+  rowSweepRow: number | null;
+  floatingReward: FloatingReward | null;
   setUsernameDraft: (value: string) => void;
   submitSelection: () => Promise<void>;
   rotateClockwise: () => Promise<void>;
@@ -124,8 +156,13 @@ type GameContextValue = {
 const GameContext = createContext<GameContextValue | null>(null);
 
 const CLEAR_ANIMATION_MS = 220;
-const SETTLE_ANIMATION_MS = 260;
-const ROTATE_ANIMATION_MS = 420;
+const SETTLE_ANIMATION_MS = 180;
+const ROTATE_ANIMATION_MS = 260;
+const ROW_SWEEP_MS = 360;
+const FLOATING_REWARD_MS = 760;
+const LOAD_WINDOW_MS = 7000;
+const LOAD_THRESHOLD = 14;
+const LOAD_RECOVERY_MS = 6000;
 
 export function GameProvider({ children }: { children: ReactNode }) {
   const [playerId, setPlayerId] = useState<string>("");
@@ -133,18 +170,84 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [usernameDraft, setUsernameDraft] = useState<string>("");
   const [dateKey, setDateKey] = useState<string>("");
   const [gameState, setGameState] = useState<GameState | null>(null);
+  const [boardValidation, setBoardValidation] = useState<BoardValidation | null>(null);
   const [uiState, dispatchUi] = useReducer(uiReducer, initialUiState);
   const [loadingState, setLoadingState] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [savingUsername, setSavingUsername] = useState(false);
   const [completed, setCompleted] = useState(false);
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+  const [highLoadEffects, setHighLoadEffects] = useState(false);
+  const [successImpactNonce, setSuccessImpactNonce] = useState(0);
+  const [invalidImpactNonce, setInvalidImpactNonce] = useState(0);
+  const [scorePulseNonce, setScorePulseNonce] = useState(0);
+  const [rowSweepNonce, setRowSweepNonce] = useState(0);
+  const [rowSweepRow, setRowSweepRow] = useState<number | null>(null);
+  const [floatingReward, setFloatingReward] = useState<FloatingReward | null>(null);
   const userTimeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", []);
 
   const draggingRef = useRef(false);
   const anchorRef = useRef<Position | null>(null);
   const selectionRef = useRef<Position[]>([]);
+  const recentEffectTimestampsRef = useRef<number[]>([]);
+  const loadRecoveryTimeoutRef = useRef<number | null>(null);
+  const floatingRewardTimeoutRef = useRef<number | null>(null);
+  const rowSweepTimeoutRef = useRef<number | null>(null);
 
   const disabled = loadingState || completed || !gameState || uiState.rotating;
+  const effectsReduced = prefersReducedMotion || highLoadEffects;
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const onChange = (event: MediaQueryListEvent) => {
+      setPrefersReducedMotion(event.matches);
+    };
+    setPrefersReducedMotion(media.matches);
+    media.addEventListener("change", onChange);
+    return () => {
+      media.removeEventListener("change", onChange);
+    };
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (loadRecoveryTimeoutRef.current !== null) {
+        window.clearTimeout(loadRecoveryTimeoutRef.current);
+      }
+      if (floatingRewardTimeoutRef.current !== null) {
+        window.clearTimeout(floatingRewardTimeoutRef.current);
+      }
+      if (rowSweepTimeoutRef.current !== null) {
+        window.clearTimeout(rowSweepTimeoutRef.current);
+      }
+    },
+    []
+  );
+
+  const registerEffectLoad = useCallback(() => {
+    const now = Date.now();
+    const next = recentEffectTimestampsRef.current
+      .filter((value) => now - value <= LOAD_WINDOW_MS)
+      .concat(now);
+    recentEffectTimestampsRef.current = next;
+
+    if (next.length < LOAD_THRESHOLD) {
+      return;
+    }
+
+    setHighLoadEffects(true);
+    if (loadRecoveryTimeoutRef.current !== null) {
+      window.clearTimeout(loadRecoveryTimeoutRef.current);
+    }
+    loadRecoveryTimeoutRef.current = window.setTimeout(() => {
+      setHighLoadEffects(false);
+      recentEffectTimestampsRef.current = [];
+      loadRecoveryTimeoutRef.current = null;
+    }, LOAD_RECOVERY_MS);
+  }, []);
 
   const loadStateForPlayer = useCallback(
     async (pid: string) => {
@@ -158,9 +261,20 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
       setDateKey(payload.dateKey);
       setGameState(payload.state);
+      setBoardValidation(payload.boardValidation);
       setCompleted(payload.completed);
       setUsername(payload.username ?? null);
       setUsernameDraft(payload.username ?? "");
+      if (floatingRewardTimeoutRef.current !== null) {
+        window.clearTimeout(floatingRewardTimeoutRef.current);
+        floatingRewardTimeoutRef.current = null;
+      }
+      if (rowSweepTimeoutRef.current !== null) {
+        window.clearTimeout(rowSweepTimeoutRef.current);
+        rowSweepTimeoutRef.current = null;
+      }
+      setRowSweepRow(null);
+      setFloatingReward(null);
       dispatchUi({
         type: "patch",
         patch: {
@@ -281,15 +395,69 @@ export function GameProvider({ children }: { children: ReactNode }) {
     return selectionToDisplay(gameState.grid, uiState.selection);
   }, [gameState, uiState.selection]);
 
-  const canSubmitSelection = useMemo(() => {
-    if (!gameState) {
-      return false;
+  const selectionPreview = useMemo<SelectionPreview>(() => {
+    if (!gameState || !boardValidation) {
+      return {
+        status: "idle",
+        resolvedWord: null,
+        score: null,
+        rowClear: false
+      };
     }
-    return (
-      normalizeSelection(gameState.grid, uiState.selection).valid &&
-      uiState.selection.length >= MIN_WORD_LENGTH
-    );
-  }, [gameState, uiState.selection]);
+
+    const normalized = normalizeSelection(gameState.grid, uiState.selection);
+    if (!normalized.valid || normalized.positions.length === 0) {
+      return {
+        status: "idle",
+        resolvedWord: null,
+        score: null,
+        rowClear: false
+      };
+    }
+
+    if (normalized.positions.length < MIN_WORD_LENGTH) {
+      return {
+        status: "tooShort",
+        resolvedWord: null,
+        score: null,
+        rowClear: false
+      };
+    }
+
+    const pattern = normalized.positions
+      .map(({ row, col }) => {
+        const tile = gameState.grid[row][col];
+        return tile.kind === "letter" ? (tile.isWildcard ? "*" : tile.letter.toUpperCase()) : "";
+      })
+      .join("");
+    const resolved = boardValidation.patterns[pattern];
+
+    if (!resolved) {
+      return {
+        status: "invalid",
+        resolvedWord: null,
+        score: null,
+        rowClear: false
+      };
+    }
+
+    const row = normalized.positions[0]?.row ?? -1;
+    const rowTiles = row >= 0 ? gameState.grid[row] : [];
+    const rowClear =
+      row >= 0 &&
+      rowTiles.length > 0 &&
+      rowTiles.every((tile) => tile.kind !== "stone") &&
+      normalized.positions.length === rowTiles.length;
+
+    return {
+      status: "valid",
+      resolvedWord: resolved.word,
+      score: scoreWord(resolved.word, resolved.wildcardCount, rowClear),
+      rowClear
+    };
+  }, [boardValidation, gameState, uiState.selection]);
+
+  const canSubmitSelection = selectionPreview.status === "valid";
 
   const runSubmit = useCallback(async () => {
     if (!gameState || disabled || submitting) {
@@ -325,13 +493,54 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setDateKey(payload.dateKey);
 
       if (payload.accepted) {
+        registerEffectLoad();
         const row = activeSelection[0]?.row ?? null;
+        const scoreDelta = Math.max(0, payload.state.score - gameState.score);
+        const selectionCols = activeSelection.map((position) => position.col);
+        const startCol = selectionCols.length ? Math.min(...selectionCols) : 0;
+        const endCol = selectionCols.length ? Math.max(...selectionCols) : 0;
         const rowCanFlash =
           row !== null &&
           row >= 0 &&
           row < gridBeforeSubmit.length &&
           gridBeforeSubmit[row].every((tile) => tile.kind !== "stone") &&
           activeSelection.length === gridBeforeSubmit[row].length;
+
+        if (!effectsReduced) {
+          setSuccessImpactNonce((nonce) => nonce + 1);
+        }
+        setScorePulseNonce((nonce) => nonce + 1);
+        if (!effectsReduced) {
+          const rewardId = Date.now();
+          setFloatingReward({
+            id: rewardId,
+            text: rowCanFlash ? `+${scoreDelta} ROW CLEAR` : `+${scoreDelta}`,
+            row: row ?? 0,
+            startCol,
+            endCol,
+            kind: rowCanFlash ? "rowClear" : "word"
+          });
+          if (floatingRewardTimeoutRef.current !== null) {
+            window.clearTimeout(floatingRewardTimeoutRef.current);
+          }
+          floatingRewardTimeoutRef.current = window.setTimeout(() => {
+            setFloatingReward((current) => (current?.id === rewardId ? null : current));
+            floatingRewardTimeoutRef.current = null;
+          }, FLOATING_REWARD_MS);
+          triggerHaptic(rowCanFlash ? [14, 18, 24] : [12]);
+        }
+
+        if (!effectsReduced && rowCanFlash && row !== null) {
+          setRowSweepRow(row);
+          setRowSweepNonce((nonce) => nonce + 1);
+          if (rowSweepTimeoutRef.current !== null) {
+            window.clearTimeout(rowSweepTimeoutRef.current);
+          }
+          rowSweepTimeoutRef.current = window.setTimeout(() => {
+            setRowSweepRow((currentRow) => (currentRow === row ? null : currentRow));
+            rowSweepTimeoutRef.current = null;
+          }, ROW_SWEEP_MS);
+        }
 
         if (activeSelection.length > 0) {
           dispatchUi({
@@ -341,7 +550,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
               clearingRow: rowCanFlash ? row : null
             }
           });
-          await delay(CLEAR_ANIMATION_MS);
+          await delay(effectsReduced ? 110 : CLEAR_ANIMATION_MS);
         }
 
         const matchedWord = /^Cleared\s+([A-Z]+)/.exec(payload.message || "");
@@ -354,6 +563,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
         const settleEffects = getSettleEffects(gridBeforeSubmit, payload.state.grid, activeSelection);
 
         setGameState(payload.state);
+        setBoardValidation(payload.boardValidation);
         setCompleted(payload.completed);
         dispatchUi({
           type: "patch",
@@ -379,7 +589,12 @@ export function GameProvider({ children }: { children: ReactNode }) {
           ...uiState.markedInvalidSelection,
           ...activeSelection
         ]);
+        setInvalidImpactNonce((nonce) => nonce + 1);
+        if (!effectsReduced) {
+          triggerHaptic([22, 20, 20]);
+        }
         setGameState(payload.state);
+        setBoardValidation(payload.boardValidation);
         setCompleted(payload.completed);
         dispatchUi({
           type: "patch",
@@ -400,10 +615,20 @@ export function GameProvider({ children }: { children: ReactNode }) {
       if (shouldRunSettleAnimation) {
         window.setTimeout(() => {
           dispatchUi({ type: "clearSettlingEffects" });
-        }, SETTLE_ANIMATION_MS);
+        }, effectsReduced ? 150 : SETTLE_ANIMATION_MS);
       }
     }
-  }, [disabled, gameState, playerId, submitting, uiState.lastWord, uiState.markedInvalidSelection, userTimeZone]);
+  }, [
+    disabled,
+    effectsReduced,
+    gameState,
+    playerId,
+    registerEffectLoad,
+    submitting,
+    uiState.lastWord,
+    uiState.markedInvalidSelection,
+    userTimeZone
+  ]);
 
   const runPunchout = useCallback(
     async (row: number, col: number) => {
@@ -434,13 +659,18 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
         setDateKey(payload.dateKey);
         if (payload.accepted) {
+          registerEffectLoad();
+          if (!effectsReduced) {
+            setSuccessImpactNonce((nonce) => nonce + 1);
+            triggerHaptic([10]);
+          }
           dispatchUi({
             type: "patch",
             patch: {
               clearingSelection: [{ row, col }]
             }
           });
-          await delay(CLEAR_ANIMATION_MS);
+          await delay(effectsReduced ? 110 : CLEAR_ANIMATION_MS);
           dispatchUi({
             type: "patch",
             patch: {
@@ -449,6 +679,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
           });
         }
         setGameState(payload.state);
+        setBoardValidation(payload.boardValidation);
         setCompleted(payload.completed);
         if (payload.accepted) {
           dispatchUi({
@@ -485,11 +716,20 @@ export function GameProvider({ children }: { children: ReactNode }) {
         if (shouldRunSettleAnimation) {
           window.setTimeout(() => {
             dispatchUi({ type: "clearSettlingEffects" });
-          }, SETTLE_ANIMATION_MS);
+          }, effectsReduced ? 150 : SETTLE_ANIMATION_MS);
         }
       }
     },
-    [disabled, gameState, playerId, submitting, uiState.markedInvalidSelection, userTimeZone]
+    [
+      disabled,
+      effectsReduced,
+      gameState,
+      playerId,
+      registerEffectLoad,
+      submitting,
+      uiState.markedInvalidSelection,
+      userTimeZone
+    ]
   );
 
   const runRotate = useCallback(
@@ -556,6 +796,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
         }
         setDateKey(payload.dateKey);
         setGameState(payload.state);
+        setBoardValidation(payload.boardValidation);
         setCompleted(payload.completed);
         dispatchUi({
           type: "patch",
@@ -646,6 +887,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
           return;
         }
         nextRange.push({ row, col: c });
+      }
+
+      if (positionsEqual(selectionRef.current, nextRange)) {
+        return;
       }
 
       dispatchUi({
@@ -763,6 +1008,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
           nextRange.push({ row: uiState.cursor.row, col });
         }
 
+        if (positionsEqual(selectionRef.current, nextRange)) {
+          return;
+        }
+
         dispatchUi({
           type: "patch",
           patch: {
@@ -800,6 +1049,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     gameOver: Boolean(gameState?.gameOver),
     selectedDisplay,
     canSubmitSelection,
+    selectionPreview,
     message: uiState.message,
     errorMessage: uiState.errorMessage,
     savingUsername,
@@ -815,6 +1065,13 @@ export function GameProvider({ children }: { children: ReactNode }) {
     rotating: uiState.rotating,
     rotationVisualAngle: uiState.rotationVisualAngle,
     rotationTransitioning: uiState.rotationTransitioning,
+    effectsReduced,
+    successImpactNonce,
+    invalidImpactNonce,
+    scorePulseNonce,
+    rowSweepNonce,
+    rowSweepRow,
+    floatingReward,
     setUsernameDraft,
     submitSelection: runSubmit,
     rotateClockwise: () => runRotate("clockwise"),
@@ -834,6 +1091,27 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
   });
+}
+
+function positionsEqual(left: Position[], right: Position[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.length; index++) {
+    if (left[index].row !== right[index].row || left[index].col !== right[index].col) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function triggerHaptic(pattern: number | number[]) {
+  if (typeof navigator === "undefined" || typeof navigator.vibrate !== "function") {
+    return;
+  }
+  navigator.vibrate(pattern);
 }
 
 function getSettleEffects(
