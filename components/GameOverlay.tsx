@@ -61,8 +61,8 @@ export function GameOverlay() {
     };
 
     return (
-        <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-slate-950/45 px-4">
-            <div className="w-full max-w-md rounded-lg border-4 border-slate-200/80 bg-slate-800/95 px-4 py-4 text-slate-100 shadow-2xl">
+        <div className="absolute inset-0 z-10 flex items-center justify-center rounded-[1.6rem] bg-slate-950/60 px-4 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-[1.75rem] border border-white/14 bg-[linear-gradient(180deg,rgba(15,23,42,0.98),rgba(9,14,28,0.96))] px-5 py-5 text-slate-100 shadow-2xl">
                 <div className="game-over-stamp mb-3 py-2 sm:py-6 text-center text-3xl font-black uppercase tracking-[0.2em] sm:text-5xl">
                     Gridlock
                 </div>

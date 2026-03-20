@@ -11,7 +11,7 @@ export function RulesChip() {
                 <DrawerTrigger asChild>
                     <button
                         type="button"
-                        className="inline-flex items-center gap-1.5 rounded-md border border-slate-600 bg-slate-900/80 px-2 py-1 text-xs font-semibold text-cyan-100 hover:border-cyan-500/80 hover:text-cyan-50"
+                        className="inline-flex items-center gap-1.5 rounded-full border border-white/12 bg-white/7 px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-cyan-100 transition hover:border-cyan-300/40 hover:bg-cyan-300/12 hover:text-cyan-50"
                     >
                         <span>Rules</span>
                         <Info className="h-4 w-4" aria-hidden="true" />

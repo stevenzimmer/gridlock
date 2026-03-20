@@ -207,7 +207,7 @@ export function GridView() {
   };
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-4">
       <div
         tabIndex={0}
         onKeyDown={onKeyDown}
@@ -221,8 +221,10 @@ export function GridView() {
         onPointerUp={(event) => handlePointerUp(event.pointerId)}
         onPointerCancel={(event) => handlePointerUp(event.pointerId)}
         className={[
-          "relative mx-auto w-full rounded-xl outline-none touch-none focus:ring-2 focus:ring-cyan-300 lg:p-2",
-          disabled ? "bg-slate-700/60" : "bg-slate-900/60",
+          "relative mx-auto w-full rounded-[1.6rem] border outline-none touch-none focus:ring-2 focus:ring-cyan-300/70 p-2 sm:p-3",
+          disabled
+            ? "border-white/6 bg-slate-800/60"
+            : "border-cyan-300/14 bg-[linear-gradient(180deg,rgba(15,23,42,0.96),rgba(8,15,30,0.92))]",
           boardImpactClass
         ].join(" ")}
         style={{ contain: "layout paint" }}
@@ -231,7 +233,7 @@ export function GridView() {
         <div
           ref={boardRef}
           className={[
-            "grid origin-center gap-1",
+            "grid origin-center gap-1.5",
             rotationTransitioning
               ? "transition-transform duration-[260ms] ease-[cubic-bezier(0.22,1,0.36,1)]"
               : ""
@@ -255,7 +257,10 @@ export function GridView() {
                   key={`${rowIdx}:${colIdx}`}
                   type="button"
                   aria-label={aria}
-                  className={["aspect-square select-none touch-none", disabled ? "cursor-not-allowed" : ""].join(" ")}
+                  className={[
+                    "aspect-square select-none touch-none rounded-[1rem]",
+                    disabled ? "cursor-not-allowed" : ""
+                  ].join(" ")}
                   disabled={disabled}
                   onPointerDown={(event) => {
                     event.preventDefault();
@@ -327,7 +332,7 @@ export function GridView() {
         ) : null}
         {gameOver ? <GameOverlay /> : null}
       </div>
-      <div className="flex items-center justify-between">
+      <div className="grid grid-cols-2 gap-3">
         <button
           type="button"
           onClick={() => {
@@ -335,9 +340,10 @@ export function GridView() {
           }}
           disabled={disabled}
           aria-label="Rotate board counterclockwise"
-          className="rounded border border-amber-300/60 bg-amber-600/20 px-3 py-1 text-3xl leading-none text-amber-100 enabled:hover:bg-amber-500/30 disabled:cursor-not-allowed disabled:opacity-45"
+          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-amber-300/22 bg-amber-300/10 px-4 py-3 text-sm font-black uppercase tracking-[0.24em] text-amber-50 enabled:hover:bg-amber-300/16 disabled:cursor-not-allowed disabled:opacity-45"
         >
           <RotateCcw className="h-5 w-5" aria-hidden="true" />
+          <span>Rotate Left</span>
         </button>
         <button
           type="button"
@@ -346,9 +352,10 @@ export function GridView() {
           }}
           disabled={disabled}
           aria-label="Rotate board clockwise"
-          className="rounded border border-amber-300/60 bg-amber-600/20 px-3 py-1 text-3xl leading-none text-amber-100 enabled:hover:bg-amber-500/30 disabled:cursor-not-allowed disabled:opacity-45"
+          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-amber-300/22 bg-amber-300/10 px-4 py-3 text-sm font-black uppercase tracking-[0.24em] text-amber-50 enabled:hover:bg-amber-300/16 disabled:cursor-not-allowed disabled:opacity-45"
         >
           <RotateCw className="h-5 w-5" aria-hidden="true" />
+          <span>Rotate Right</span>
         </button>
       </div>
     </div>

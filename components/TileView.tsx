@@ -135,7 +135,7 @@ function TileViewComponent({
     <div
       ref={tileRef}
       className={[
-        "flex h-full w-full items-center justify-center rounded border text-xl lg:text-3xl font-bold transition",
+        "flex h-full w-full items-center justify-center rounded-[1rem] border text-xl font-black transition lg:text-3xl shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]",
         disabled
           ? "bg-slate-700 border-slate-500 text-slate-300 opacity-80"
           : invalid
@@ -144,7 +144,7 @@ function TileViewComponent({
               ? "bg-red-200/60 border-red-300 text-zinc-900"
               : tone,
         selected && !invalid && !disabled
-          ? `scale-[1.06] ring-2 ring-amber-300 ${effectsReduced ? "" : "selection-charge"}`
+          ? `scale-[1.06] ring-2 ring-amber-300 shadow-[0_0_24px_rgba(252,211,77,0.35)] ${effectsReduced ? "" : "selection-charge"}`
           : "",
         invalid && !disabled ? "ring-2 ring-red-200" : "",
         cursor && !disabled ? "ring-2 ring-emerald-300" : "",
